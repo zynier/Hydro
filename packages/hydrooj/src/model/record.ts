@@ -26,7 +26,7 @@ export default class RecordModel {
         '_id', 'score', 'time', 'memory', 'lang',
         'uid', 'pid', 'rejudged', 'progress', 'domainId',
         'contest', 'judger', 'judgeAt', 'status', 'source',
-        'files', 'hackTarget',
+        'files', 'hackTarget', 'hardware',
     ];
 
     static STAT_QUERY = {
@@ -133,6 +133,7 @@ export default class RecordModel {
             contest?: ObjectId;
             input?: string[];
             files?: Record<string, string>;
+            hardware?: string;
             hackTarget?: ObjectId;
             type: 'judge' | 'rejudge' | 'pretest' | 'hack' | 'generate';
             notify?: boolean;
@@ -159,6 +160,7 @@ export default class RecordModel {
         let isContest = !!args.contest;
         if (args.contest) data.contest = args.contest;
         if (args.files) data.files = args.files;
+        if (args.hardware) data.hardware = args.hardware;
         if (args.hackTarget) data.hackTarget = args.hackTarget;
         if (args.notify) data.notify = true;
         if (args.type === 'rejudge') {

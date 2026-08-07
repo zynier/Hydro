@@ -733,10 +733,16 @@ problem_solution: 題解
 problem_submit: 遞交程式碼
 problem_type.communication: 通訊題
 problem_type.default: 傳統題
+problem_type.gpu: GPU 算子題
 problem_type.interactive: 互動題
 problem_type.objective: 客觀題
 problem_type.remote_judge: 遠端評測題
 problem_type.submit_answer: 提交答案題
+GPU hardware: GPU 硬體
+Any compatible GPU: 任一相容 GPU
+Theoretical lower bound: 理論下限
+No compatible GPU is currently available.: 目前沒有相容的 GPU。
+Configure GPU workloads in the YAML editor.: 請在 YAML 編輯器中設定 GPU 工作負載。
 problem-category-delim: '|'
 problem-subcategory-delim: 、
 Problem: 題目

@@ -473,6 +473,11 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
             ? Object.fromEntries(this.pdoc.config.langs.map((i) => [i, setting.langs[i]?.display || i]))
             : setting.SETTINGS_BY_KEY.codeLang.range;
         this.response.body.langRange = langRange;
+        const config = this.pdoc.config;
+        if (typeof config === 'object' && config.type === 'gpu') {
+            const pool = (this.ctx as any).gpu;
+            this.response.body.gpuHardware = pool?.hardware?.() || [];
+        }
         this.response.body.page_name = this.tdoc
             ? this.tdoc.rule === 'homework'
                 ? 'homework_detail_problem_submit'
@@ -484,11 +489,18 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
     @param('code', Types.String, true)
     @param('pretest', Types.Boolean)
     @param('input', Types.ArrayOf(Types.String, true), true)
+    @param('hardware', Types.String, true)
     @param('tid', Types.ObjectId, true)
-    async post(domainId: string, lang: string, code: string, pretest = false, input: string[] = [], tid?: ObjectId) {
+    async post(
+        domainId: string, lang: string, code: string, pretest = false, input: string[] = [], hardware = '', tid?: ObjectId,
+    ) {
         const config = this.pdoc.config;
         if (typeof config === 'string' || config === null) throw new ProblemConfigError();
-        if (['submit_answer', 'objective'].includes(config.type)) {
+        if (config.type === 'gpu') {
+            if (lang !== 'cuda') throw new ProblemNotAllowLanguageError();
+            const available = (this.ctx as any).gpu?.hardware?.() || [];
+            if (hardware && !available.some((item) => item.id === hardware)) throw new ValidationError('hardware');
+        } else if (['submit_answer', 'objective'].includes(config.type)) {
             lang = '_';
         } else if ((config.langs && !config.langs.includes(lang)) || !setting.langs[lang] || setting.langs[lang].disabled) {
             throw new ProblemNotAllowLanguageError();
@@ -527,7 +539,7 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
         }
         const rid = await record.add(
             domainId, this.pdoc.docId, this.user._id, lang, code, true,
-            pretest ? { input, type: 'pretest' } : { contest: tid, files, type: 'judge' },
+            pretest ? { input, type: 'pretest' } : { contest: tid, files, hardware, type: 'judge' },
         );
         if (!pretest) {
             await Promise.all([
@@ -1059,6 +1071,8 @@ declare module '@hydrooj/framework' {
         problem: typeof ProblemApi;
     }
 }
+
+export const inject = { gpu: false };
 
 export async function apply(ctx: Context) {
     ctx.Route('problem_main', '/p', ProblemMainHandler, PERM.PERM_VIEW_PROBLEM);

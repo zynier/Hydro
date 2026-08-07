@@ -66,7 +66,7 @@ const problemConfigSchema: JSONSchema7 = {
   properties: {
     redirect: { type: 'string', pattern: '[0-9a-zA-Z_-]+\\/[0-9]+' },
     key: { type: 'string', pattern: '[0-9a-f]{32}' },
-    type: { enum: ['default', 'interactive', 'communication', 'submit_answer', 'objective', 'remote_judge'] },
+    type: { enum: ['default', 'gpu', 'interactive', 'communication', 'submit_answer', 'objective', 'remote_judge'] },
     subType: { type: 'string' },
     langs: { type: 'array', items: { type: 'string' } },
     target: { type: 'string' },
@@ -116,6 +116,31 @@ const problemConfigSchema: JSONSchema7 = {
     },
     time_limit_rate: { $ref: '#/definitions/rateConfig' },
     memory_limit_rate: { $ref: '#/definitions/rateConfig' },
+    gpu: {
+      type: 'object',
+      properties: {
+        entry: { type: 'string', pattern: '^[A-Za-z_][A-Za-z0-9_]*$' },
+        testcase: { type: 'string', pattern: '^[^/\\\\]+\\.py$' },
+        warmup: { type: 'integer', minimum: 0, maximum: 1000 },
+        repeats: { type: 'integer', minimum: 1, maximum: 10000 },
+        cases: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'integer', minimum: 1 },
+              memory: { $ref: '#/definitions/memory' },
+              warmup: { type: 'integer', minimum: 0, maximum: 1000 },
+              repeats: { type: 'integer', minimum: 1, maximum: 10000 },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['cases'],
+      additionalProperties: false,
+    },
   },
   additionalProperties: false,
 };

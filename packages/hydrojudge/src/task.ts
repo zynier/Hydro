@@ -187,7 +187,7 @@ export class JudgeTask {
                 key: md5(`${this.source}/${getConfig('secret')}`),
                 trusted: this.request.trusted && this.session.config.trusted,
                 lang: this.lang,
-                langConfig: (this.request.type === 'generate' || ['objective', 'submit_answer'].includes(this.request.config.type))
+                langConfig: (this.request.type === 'generate' || ['gpu', 'objective', 'submit_answer'].includes(this.request.config.type))
                     ? null : this.session.getLang(this.lang),
             },
         );

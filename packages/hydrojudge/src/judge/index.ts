@@ -1,6 +1,7 @@
 import * as communication from './communication';
 import * as def from './default';
 import * as generate from './generate';
+import * as gpu from './gpu';
 import * as hack from './hack';
 import * as interactive from './interactive';
 import { Context } from './interface';
@@ -9,5 +10,5 @@ import * as run from './run';
 import * as submit_answer from './submit_answer';
 
 export = {
-    default: def, generate, interactive, communication, run, submit_answer, objective, hack,
+    default: def, generate, gpu, interactive, communication, run, submit_answer, objective, hack,
 } as Record<string, { judge(ctx: Context): Promise<void> }>;

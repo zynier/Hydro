@@ -5,11 +5,29 @@ export type CompilableSource = string | {
 
 export enum ProblemType {
     Default = 'default',
+    GPU = 'gpu',
     SubmitAnswer = 'submit_answer',
     Interactive = 'interactive',
     Communication = 'communication',
     Objective = 'objective',
     Remote = 'remote_judge',
+}
+
+export interface GPUCaseConfig {
+    id?: number;
+    memory?: string;
+    warmup?: number;
+    repeats?: number;
+}
+
+export interface GPUProblemConfig {
+    /** Exported C entry point invoked with tensors as device pointers and scalar values. */
+    entry?: string;
+    /** Trusted XPUOJ-compatible data generator, PyTorch baseline, checker, and workload definition. */
+    testcase?: string;
+    warmup?: number;
+    repeats?: number;
+    cases: GPUCaseConfig[];
 }
 
 export interface TestCaseConfig {
@@ -63,6 +81,7 @@ export interface ProblemConfigFile {
     validator?: CompilableSource;
     time_limit_rate?: Record<string, number>;
     memory_limit_rate?: Record<string, number>;
+    gpu?: GPUProblemConfig;
 }
 
 export interface FileInfo {
@@ -106,6 +125,8 @@ export interface RecordPayload extends RecordJudgeInfo {
     code: string;
     rejudged: boolean;
     source?: string;
+    /** Requested GPU model for GPU operator submissions; empty means any compatible GPU. */
+    hardware?: string;
     progress?: number;
     /** pretest */
     input?: string | string[];

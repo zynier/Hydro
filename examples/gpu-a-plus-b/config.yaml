@@ -1,0 +1,14 @@
+type: gpu
+langs:
+  - cuda
+time: 120s
+memory: 12g
+gpu:
+  entry: run_kernel
+  testcase: testcase_config.py
+  cases:
+    - id: 1
+    - id: 2
+    - id: 3
+    - id: 4
+    - id: 5

@@ -32,6 +32,7 @@ const configKey = [
   'manager', 'num_processes', 'multi_pass', 'validator', 'user_extra_files',
   'judge_extra_files', 'detail', 'outputs', 'redirect', 'cases',
   'subtasks', 'langs', 'key', 'time_limit_rate', 'memory_limit_rate',
+  'gpu',
 ];
 
 const subtasksKey = [

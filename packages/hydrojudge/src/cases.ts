@@ -4,7 +4,7 @@ import {
 } from '@hydrooj/common';
 import { readYamlCases } from '@hydrooj/common/cases';
 import {
-    changeErrorType, fs, yaml,
+    changeErrorType, fs, parseTimeMS, yaml,
 } from '@hydrooj/utils';
 import { getConfig } from './config';
 import { FormatError, SystemError } from './error';
@@ -66,6 +66,59 @@ interface Args {
     langConfig?: LangConfig;
 }
 
+function normalizeGPUConfig(folder: string, config: Record<string, any>, args: Args): ParsedConfig {
+    if (args.lang !== 'cuda') throw new FormatError('GPU operator problems only support CUDA C++.');
+    const gpu = config.gpu;
+    if (!gpu || typeof gpu !== 'object') throw new FormatError('GPU configuration is required.');
+    const entry = gpu.entry || 'run_kernel';
+    const testcase = gpu.testcase || 'testcase_config.py';
+    if (typeof entry !== 'string') throw new FormatError('GPU entry function must be a string.');
+    if (typeof testcase !== 'string') throw new FormatError('GPU testcase must be a string.');
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(entry)) throw new FormatError('Invalid GPU entry function.');
+    if (path.basename(testcase) !== testcase || !testcase.endsWith('.py')) {
+        throw new FormatError('GPU testcase must be a Python filename in the testdata root.');
+    }
+    if (!fs.existsSync(path.join(folder, testcase))) throw new FormatError('GPU testcase file not found: {0}', [testcase]);
+    if (!Array.isArray(gpu.cases) || !gpu.cases.length) throw new FormatError('At least one GPU case is required.');
+    if (gpu.cases.length > (getConfig('testcases_max') || 100)) throw new FormatError('Too many testcases. Cancelled.');
+    const ids = new Set<number>();
+    const cases = gpu.cases.map((test, index) => {
+        if (!test || typeof test !== 'object' || Array.isArray(test)) throw new FormatError('GPU cases must be objects.');
+        const id = test.id ?? index + 1;
+        const warmup = test.warmup ?? gpu.warmup;
+        const repeats = test.repeats ?? gpu.repeats;
+        if (!Number.isSafeInteger(id) || id < 1 || ids.has(id)) throw new FormatError('GPU case ids must be unique positive integers.');
+        if (warmup !== undefined && (!Number.isSafeInteger(warmup) || warmup < 0 || warmup > 1000)) {
+            throw new FormatError('GPU warmup must be between 0 and 1000.');
+        }
+        if (repeats !== undefined && (!Number.isSafeInteger(repeats) || repeats < 1 || repeats > 10000)) {
+            throw new FormatError('GPU repeats must be between 1 and 10000.');
+        }
+        ids.add(id);
+        return {
+            id,
+            memory: parseMemoryMB(test.memory || config.memory || '256m'),
+            ...(warmup === undefined ? {} : { warmup }),
+            ...(repeats === undefined ? {} : { repeats }),
+        };
+    });
+    return {
+        ...config,
+        checker_type: 'default',
+        count: cases.length,
+        detail: config.detail || 'full',
+        time: parseTimeMS(config.time || '10s'),
+        memory: parseMemoryMB(config.memory || '256m'),
+        gpu: {
+            ...gpu,
+            entry,
+            testcase,
+            cases,
+        },
+        subtasks: [],
+    } as ParsedConfig;
+}
+
 export default async function readCases(folder: string, cfg: ProblemConfigFile = {}, args: Args): Promise<ParsedConfig> {
     const iniConfig = path.resolve(folder, 'config.ini');
     const yamlConfig = path.resolve(folder, 'config.yaml');
@@ -89,6 +142,7 @@ export default async function readCases(folder: string, cfg: ProblemConfigFile =
     } catch (e) {
         throw changeErrorType(e, FormatError);
     }
+    if (config.type === 'gpu') return normalizeGPUConfig(folder, config, args);
     const timeRate = +(config.time_limit_rate?.[args.lang] || args.langConfig?.time_limit_rate || 1) || 1;
     const memoryRate = +(config.memory_limit_rate?.[args.lang] || args.langConfig?.memory_limit_rate || 1) || 1;
     const checkFile = ensureFile(folder);

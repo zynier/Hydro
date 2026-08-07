@@ -97,6 +97,15 @@ langs:
     cc.cc20o2:
       compile: /usr/bin/g++ -Wall -std=c++20 -o foo foo.cc -lm -O2 -I/include
       display: C++20(O2)
+    cuda:
+      compile: echo "CUDA C++ is only available for GPU operator problems"
+      code_file: submission.cu
+      execute: echo "CUDA C++ is only available for GPU operator problems"
+      highlight: cpp
+      monaco: cpp
+      display: CUDA C++
+      hidden: true
+      process_limit: 1
     pas:
       compile: /usr/bin/fpc -O2 -o/w/foo foo.pas
       highlight: pascal

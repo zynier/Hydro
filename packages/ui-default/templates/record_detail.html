@@ -86,6 +86,10 @@
             <dt>{{ _('Language') }}</dt>
             <dd>{{ model.setting.langs[rdoc.lang].display }}</dd>
           {% endif %}
+          {% if rdoc.hardware %}
+            <dt>{{ _('GPU hardware') }}</dt>
+            <dd>{{ rdoc.hardware }}</dd>
+          {% endif %}
           {% if rdoc.code %}
             <dt>{{ _('Code Length') }}</dt>
             <dd>{{ size(rdoc.code|length) }}</dd>

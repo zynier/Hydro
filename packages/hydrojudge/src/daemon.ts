@@ -16,6 +16,7 @@ import './utils';
 import PQueue from 'p-queue';
 import { fs, Time } from '@hydrooj/utils';
 import { getConfig } from './config';
+import { gpuPool } from './gpu';
 import HydroHost from './hosts/hydro';
 import Vj4Host from './hosts/vj4';
 import log from './log';
@@ -47,6 +48,7 @@ process.on('unhandledRejection', (reason, p) => {
 async function daemon() {
     const shouldRun = await versionCheck((msg) => log.error(msg));
     if (!shouldRun) process.exit(1);
+    await gpuPool.start();
     const tracing = getConfig('tracing');
     if (tracing?.endpoint && tracing?.samplePercentage) initTracing(tracing.endpoint, tracing.samplePercentage);
     const _hosts = getConfig('hosts');

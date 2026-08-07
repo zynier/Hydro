@@ -91,7 +91,7 @@ export const NORMAL_STATUS: STATUS[] = [
 
 export function getScoreColor(score: number | string): string {
     if (score === null || score === undefined || !Number.isFinite(+score)) return '#000000';
-    return [
+    const colors = [
         '#ff4f4f',
         '#ff694f',
         '#f8603a',
@@ -103,7 +103,8 @@ export function getScoreColor(score: number | string): string {
         '#b0d628',
         '#93b127',
         '#25ad40',
-    ][Math.floor((Number(score) || 0) / 10)];
+    ];
+    return colors[Math.max(0, Math.min(colors.length - 1, Math.floor((Number(score) || 0) / 10)))];
 }
 
 export const USER_GENDER_MALE = 0;

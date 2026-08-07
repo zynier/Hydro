@@ -10,6 +10,7 @@ import {
 import { langs } from 'hydrooj/src/model/setting';
 import { getConfig } from '../config';
 import { SystemError } from '../error';
+import { gpuPool } from '../gpu';
 import { compilerVersions, stackSize } from '../info';
 import { Session } from '../interface';
 import { Context } from '../judge/interface';
@@ -52,6 +53,8 @@ const session: Session = {
 };
 
 export async function apply(ctx: HydroContext) {
+    await gpuPool.start();
+    ctx.provide('gpu', gpuPool);
     ctx.inject(['check'], (c) => {
         c.check.addChecker('Judge', async (_ctx, log, warn, error) => {
             await versionCheck(warn, error);
@@ -83,7 +86,7 @@ export async function apply(ctx: HydroContext) {
         ]);
         await coll.updateOne(
             { mid: info.mid, type: 'server' },
-            { $set: { compilers, stackSize: size } },
+            { $set: { compilers, stackSize: size, gpus: gpuPool.hardware() } },
             { upsert: true },
         );
     }

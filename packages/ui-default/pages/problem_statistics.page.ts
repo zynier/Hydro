@@ -33,7 +33,7 @@ const page = new NamedPage('problem_statistics', () => {
       ],
     });
     const $score = document.getElementById('submission-score-placeholder');
-    const x = Array.from({ length: 101 }, (v, i) => i).filter((i) => UiContext.pdoc.stats[`s${i}`]);
+    const x = Array.from({ length: 151 }, (v, i) => i).filter((i) => UiContext.pdoc.stats[`s${i}`]);
     const scoreChart = echarts.init($score);
     scoreChart.setOption({
       tooltip: { trigger: 'item' },

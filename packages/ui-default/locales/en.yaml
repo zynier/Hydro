@@ -30,10 +30,16 @@ problem_solution: Problem Solution
 problem_submit: Problem Submit
 problem_type.communication: 'Type: Communication'
 problem_type.default: 'Type: Default'
+problem_type.gpu: 'Type: GPU Operator'
 problem_type.interactive: 'Type: Interactive'
 problem_type.objective: 'Type: Objective'
 problem_type.remote_judge: 'Type: RemoteJudge'
 problem_type.submit_answer: 'Type: SubmitAnswer'
+GPU hardware: GPU hardware
+Any compatible GPU: Any compatible GPU
+Theoretical lower bound: Theoretical lower bound
+No compatible GPU is currently available.: No compatible GPU is currently available.
+Configure GPU workloads in the YAML editor.: Configure GPU workloads in the YAML editor.
 problem-category-delim: '|'
 problem-subcategory-delim: ', '
 problem.import.additional_file: '## Additional Files'

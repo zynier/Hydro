@@ -5,7 +5,7 @@ import type fs from 'fs';
 import type { Dictionary, NumericDictionary } from 'lodash';
 import type { Binary, FindCursor, ObjectId } from 'mongodb';
 import type {
-    FileInfo, RecordJudgeInfo, RecordPayload, SubtaskResult,
+    FileInfo, GPUProblemConfig, RecordJudgeInfo, RecordPayload, SubtaskResult,
 } from '@hydrooj/common/types';
 import type { Context } from './context';
 import type { PrintTaskStatus } from './model/contest';
@@ -150,6 +150,7 @@ export interface ProblemConfig {
     subType?: string;
     target?: string;
     hackable?: boolean;
+    gpu?: GPUProblemConfig;
 }
 
 export type Content = string | Record<string, string>;

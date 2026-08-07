@@ -32,6 +32,7 @@ export default function ProblemType() {
             onChange={dispatcher({ type: 'CONFIG_FORM_UPDATE', key: 'type' })}
             data={[
               { label: i18n('problem_type.default'), value: 'default' },
+              { label: i18n('problem_type.gpu'), value: 'gpu' },
               { label: i18n('problem_type.interactive'), value: 'interactive' },
               { label: i18n('problem_type.communication'), value: 'communication' },
               { label: i18n('problem_type.submit_answer'), value: 'submit_answer' },
@@ -158,6 +159,10 @@ export default function ProblemType() {
 
         {Type === 'objective' && (
           <p>{i18n('Unsupported configure this type of problem. Please refer to the documentation.')}</p>
+        )}
+
+        {Type === 'gpu' && (
+          <p>{i18n('Configure GPU workloads in the YAML editor.')}</p>
         )}
       </Card>
     </FormItem>

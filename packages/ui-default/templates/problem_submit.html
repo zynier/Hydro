@@ -18,6 +18,28 @@
               }) }}
           </div>
           <div class="row nojs--hide" id="codelang-selector"></div>
+          {% if pdoc.config.type == 'gpu' %}
+            <div class="row">
+              <div class="medium-12 columns form__item end">
+                <label>
+                  {{ _('GPU hardware') }}
+                  <div class="select-container">
+                    <select name="hardware" class="select">
+                      <option value="">{{ _('Any compatible GPU') }}</option>
+                      {% for hardware in gpuHardware %}
+                        <option value="{{ hardware.id }}">
+                          {{ hardware.name }} (sm_{{ hardware.computeCapability|replace('.', '') }}, {{ (hardware.memoryMiB / 1024)|round(1) }} GiB)
+                        </option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                </label>
+              </div>
+            </div>
+            {% if not gpuHardware.length %}
+              <blockquote class="warn">{{ _('No compatible GPU is currently available.') }}</blockquote>
+            {% endif %}
+          {% endif %}
           {{ form.form_textarea({label:'Code', columns:12, name:'code', extra_class:'monospace', autofocus:true, nospellcheck:true}) }}
           <div class="row">
             <div class="medium-12 columns">

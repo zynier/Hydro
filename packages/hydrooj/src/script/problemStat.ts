@@ -117,7 +117,7 @@ export async function pdoc(report) {
             },
         },
     ];
-    for (let i = 0; i <= 100; i++) {
+    for (let i = 0; i <= 150; i++) {
         pipeline[1].$group[`s${i}`] = {
             $sum: {
                 $cond: [{
@@ -148,7 +148,7 @@ export async function pdoc(report) {
                 CE: adoc.CE,
             },
         };
-        for (let i = 0; i <= 100; i++) if (adoc[`s${i}`]) $set.stats[`s${i}`] = adoc[`s${i}`];
+        for (let i = 0; i <= 150; i++) if (adoc[`s${i}`]) $set.stats[`s${i}`] = adoc[`s${i}`];
         bulk.find({
             domainId: adoc._id.domainId,
             docType: document.TYPE_PROBLEM,

@@ -49,6 +49,21 @@ export const JudgeSettings = Schema.object({
         ]), (v) => (typeof v === 'boolean' ? (v ? 'full' : 'case') : v)),
     ]).description('Show diff detail').default('full'),
     performance: Schema.boolean().description('Performance mode').default(false),
+    gpu: Schema.object({
+        enabled: Schema.boolean().default(true).description('Enable native GPU operator judge'),
+        runtime: Schema.string().default('docker').description('OCI container runtime executable'),
+        container_image: Schema.string().default('pytorch/pytorch:2.13.0-cuda13.0-cudnn9-devel')
+            .description('PyTorch CUDA development image used for untrusted submissions and baselines'),
+        nvidia_smi: Schema.string().default('nvidia-smi'),
+        nvcc: Schema.string().default('nvcc'),
+        lock_dir: Schema.string().default(path.resolve(os.tmpdir(), 'hydro', 'gpu-locks')),
+        poll_interval: Schema.number().default(1000).min(100).step(100),
+        compile_timeout: Schema.number().default(120000).min(1000).step(1000),
+        execution_timeout: Schema.number().default(120000).min(1000).step(1000),
+        cpus: Schema.number().default(4).min(1),
+        memory: Schema.string().pattern(/^\d+[kmg]b?$/g).default('8g'),
+        pids_limit: Schema.number().default(256).min(16).step(1),
+    }),
 });
 
 const oldPath = path.resolve(os.homedir(), '.config', 'hydro', 'judge.yaml');

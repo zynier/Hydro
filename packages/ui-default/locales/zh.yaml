@@ -735,10 +735,16 @@ problem_solution: 题解
 problem_submit: 递交代码
 problem_type.communication: 通信题
 problem_type.default: 传统题
+problem_type.gpu: GPU 算子题
 problem_type.interactive: 交互题
 problem_type.objective: 客观题
 problem_type.remote_judge: 远端评测题
 problem_type.submit_answer: 提交答案题
+GPU hardware: GPU 硬件
+Any compatible GPU: 任一兼容 GPU
+Theoretical lower bound: 理论下限
+No compatible GPU is currently available.: 当前没有兼容的 GPU。
+Configure GPU workloads in the YAML editor.: 请在 YAML 编辑器中配置 GPU 工作负载。
 problem-category-delim: '|'
 problem-subcategory-delim: 、
 Problem: 题目
