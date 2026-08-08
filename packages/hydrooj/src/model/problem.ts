@@ -436,13 +436,29 @@ export class ProblemModel {
         domainId: string, pid: number, uid: number,
         rid: ObjectId, status: number, score: number,
     ) {
-        const condition = status === STATUS.STATUS_ACCEPTED ? {}
+        return (await ProblemModel.updateStatusWithPrevious(domainId, pid, uid, rid, status, score)).updated;
+    }
+
+    static async updateStatusWithPrevious(
+        domainId: string, pid: number, uid: number,
+        rid: ObjectId, status: number, score: number,
+    ) {
+        const previous = await document.getStatus(domainId, document.TYPE_PROBLEM, pid, uid);
+        const condition: Filter<ProblemStatusDoc> = status === STATUS.STATUS_ACCEPTED
+            ? {
+                $or: [
+                    { status: { $ne: STATUS.STATUS_ACCEPTED } },
+                    { score: { $lt: score } },
+                    { score: { $exists: false } },
+                    { rid },
+                ],
+            }
             : { $or: [{ status: { $ne: STATUS.STATUS_ACCEPTED } }, { rid }] };
         const res = await document.setStatusIfCondition(
             domainId, document.TYPE_PROBLEM, pid, uid,
             condition, { rid, status, score },
         );
-        return !!res;
+        return { updated: !!res, previous: previous || null };
     }
 
     static async incStatus(

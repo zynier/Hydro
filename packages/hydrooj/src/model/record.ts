@@ -30,10 +30,11 @@ export default class RecordModel {
     ];
 
     static STAT_QUERY = {
-        time: [{ time: -1 }, { time: 1 }],
-        memory: [{ memory: -1 }, { memory: 1 }],
-        length: [{ length: -1 }, { length: 1 }],
-        date: [{ _id: -1 }, { _id: 1 }],
+        score: [{ score: -1, _id: -1 }, { score: 1, _id: 1 }],
+        time: [{ time: -1, score: -1 }, { time: 1, score: -1 }],
+        memory: [{ memory: -1, score: -1 }, { memory: 1, score: -1 }],
+        length: [{ length: -1, score: -1 }, { length: 1, score: -1 }],
+        date: [{ _id: -1, score: -1 }, { _id: 1, score: -1 }],
     };
 
     static RECORD_PRETEST = new ObjectId('000000000000000000000000');
@@ -300,8 +301,9 @@ export async function apply(ctx: Context) {
                 params: [pdoc.title, STATUS_TEXTS[rdoc.status]],
             }), MessageModel.FLAG_I18N);
         }
-        if (rdoc.status === STATUS.STATUS_ACCEPTED && updated) {
-            if (SystemModel.get('record.statMode') === 'unique') {
+        if (rdoc.status === STATUS.STATUS_ACCEPTED) {
+            const unique = SystemModel.get('record.statMode') === 'unique';
+            if (unique && updated) {
                 await RecordModel.collStat.deleteMany({
                     _id: { $ne: rdoc._id },
                     uid: rdoc.uid,
@@ -309,6 +311,7 @@ export async function apply(ctx: Context) {
                     domainId: rdoc.domainId,
                 });
             }
+            if (unique && !updated) return;
             await RecordModel.collStat.updateOne({
                 _id: rdoc._id,
             }, {
@@ -316,6 +319,8 @@ export async function apply(ctx: Context) {
                     domainId: rdoc.domainId,
                     pid: rdoc.pid,
                     uid: rdoc.uid,
+                    status: rdoc.status,
+                    score: rdoc.score,
                     time: rdoc.time,
                     memory: rdoc.memory,
                     length: rdoc.code?.length || 0,
@@ -337,6 +342,7 @@ export async function apply(ctx: Context) {
         db.ensureIndexes(
             RecordModel.collStat,
             { key: { domainId: 1, pid: 1, uid: 1, _id: -1 }, name: 'basic' },
+            { key: { domainId: 1, pid: 1, score: -1, _id: -1 }, name: 'score' },
             { key: { domainId: 1, pid: 1, uid: 1, time: 1 }, name: 'time' },
             { key: { domainId: 1, pid: 1, uid: 1, memory: 1 }, name: 'memory' },
             { key: { domainId: 1, pid: 1, uid: 1, length: 1 }, name: 'length' },

@@ -1,5 +1,4 @@
 {% import "components/user.html" as user with context %}
-{% import "components/problem.html" as problem with context %}
 {% import "components/nothing.html" as nothing with context %}
 {% extends "layout/basic.html" %}
 {% block content %}
@@ -70,7 +69,9 @@
               <td class="col--status record-status--border pass">
                 <div class="col--status__text">
                   <span class="icon record-status--icon pass"></span>
-                  <a href="{{ url('record_detail', rid=rsdoc._id) }}" class="record-status--text pass">AC</a>
+                  <a href="{{ url('record_detail', rid=rsdoc._id) }}" class="record-status--text pass">
+                    <span style="color: {{ utils.status.getScoreColor(rsdoc.score|default(0)) }}">{{ rsdoc.score|default(0) }}</span>
+                  </a>
                 </div>
               </td>
               <td class="col--submit-by">{{ user.render_inline(udict[rsdoc['uid']], badge=false) }}</td>

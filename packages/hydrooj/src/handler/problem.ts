@@ -979,7 +979,7 @@ export class ProblemStatisticsHandler extends ProblemDetailHandler {
     @param('direction', Types.Range([-1, 1]), true)
     @param('lang', Types.String, true)
     @param('page', Types.PositiveInt, true)
-    async get(domainId: string, sort = 'time', direction: 1 | -1 = 1, lang?: string, page = 1) {
+    async get(domainId: string, sort = 'score', direction: 1 | -1 = -1, lang?: string, page = 1) {
         if (this.tdoc) throw new ContestNotEndedError();
         const [rsdocs, pcount, rscount] = await this.paginate(
             record.getMultiStat(domainId, {

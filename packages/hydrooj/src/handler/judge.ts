@@ -121,14 +121,18 @@ export class JudgeResultCallbackContext {
     static async postJudge(rdoc: RecordDoc, context?: JudgeResultCallbackContext) {
         if (rdoc.contest?.toString().startsWith('0'.repeat(23))) return;
         const accept = rdoc.status === builtin.STATUS.STATUS_ACCEPTED;
-        const updated = await problem.updateStatus(rdoc.domainId, rdoc.pid, rdoc.uid, rdoc._id, rdoc.status, rdoc.score);
+        const statusUpdate = await problem.updateStatusWithPrevious(
+            rdoc.domainId, rdoc.pid, rdoc.uid, rdoc._id, rdoc.status, rdoc.score,
+        );
+        const { updated } = statusUpdate;
+        const firstAccepted = accept && updated && statusUpdate.previous?.status !== builtin.STATUS.STATUS_ACCEPTED;
         if (rdoc.contest) await contest.updateStatus(rdoc.domainId, rdoc.contest, rdoc.uid, rdoc._id, rdoc.pid, rdoc);
-        else if (accept && updated) await domain.incUserInDomain(rdoc.domainId, rdoc.uid, 'nAccept', 1);
+        else if (firstAccepted) await domain.incUserInDomain(rdoc.domainId, rdoc.uid, 'nAccept', 1);
         const isNormalSubmission = ![
             STATUS.STATUS_ETC, STATUS.STATUS_HACK_SUCCESSFUL, STATUS.STATUS_HACK_UNSUCCESSFUL,
             STATUS.STATUS_FORMAT_ERROR, STATUS.STATUS_SYSTEM_ERROR, STATUS.STATUS_CANCELED,
         ].includes(rdoc.status);
-        const pdoc = (accept && updated)
+        const pdoc = firstAccepted
             ? await problem.inc(rdoc.domainId, rdoc.pid, 'nAccept', 1)
             : await problem.get(rdoc.domainId, rdoc.pid, undefined, true);
         if (pdoc && isNormalSubmission) {

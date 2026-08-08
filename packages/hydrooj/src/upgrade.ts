@@ -640,4 +640,79 @@ export const coreScripts: MigrationScript[] = [
         }
         return true;
     },
+    async function _97_98() {
+        const excludedContests = [RecordModel.RECORD_PRETEST, RecordModel.RECORD_GENERATE];
+        const acceptedQuery = {
+            status: STATUS.STATUS_ACCEPTED,
+            contest: { $nin: excludedContests },
+        };
+        const unique = system.get('record.statMode') === 'unique';
+        await RecordModel.collStat.deleteMany({});
+        const statDoc = (rdoc) => ({
+            _id: rdoc._id,
+            domainId: rdoc.domainId,
+            pid: rdoc.pid,
+            uid: rdoc.uid,
+            status: rdoc.status,
+            score: rdoc.score,
+            time: rdoc.time,
+            memory: rdoc.memory,
+            length: rdoc.code?.length || 0,
+            lang: rdoc.lang,
+        });
+        const bestAccepted = RecordModel.coll.aggregate<any>([
+            { $match: acceptedQuery },
+            { $sort: { domainId: 1, pid: 1, uid: 1, score: -1, _id: -1 } },
+            {
+                $group: {
+                    _id: { domainId: '$domainId', pid: '$pid', uid: '$uid' },
+                    record: { $first: '$$ROOT' },
+                },
+            },
+            { $replaceRoot: { newRoot: '$record' } },
+        ], { allowDiskUse: true });
+        let statusOps = [];
+        let statDocs = [];
+        for await (const rdoc of bestAccepted) {
+            statusOps.push({
+                updateOne: {
+                    filter: {
+                        domainId: rdoc.domainId,
+                        docType: document.TYPE_PROBLEM,
+                        docId: rdoc.pid,
+                        uid: rdoc.uid,
+                    },
+                    update: { $set: { rid: rdoc._id, status: rdoc.status, score: rdoc.score } },
+                    upsert: true,
+                },
+            });
+            if (unique) statDocs.push(statDoc(rdoc));
+            if (statusOps.length >= 500) {
+                await document.collStatus.bulkWrite(statusOps, { ordered: false });
+                statusOps = [];
+                if (statDocs.length) {
+                    await RecordModel.collStat.insertMany(statDocs, { ordered: false });
+                    statDocs = [];
+                }
+            }
+        }
+        if (statusOps.length) await document.collStatus.bulkWrite(statusOps, { ordered: false });
+        if (statDocs.length) await RecordModel.collStat.insertMany(statDocs, { ordered: false });
+        if (!unique) {
+            const statRecords = RecordModel.coll.find(acceptedQuery).project({
+                domainId: 1, pid: 1, uid: 1, status: 1, score: 1,
+                time: 1, memory: 1, code: 1, lang: 1,
+            });
+            statDocs = [];
+            for await (const rdoc of statRecords) {
+                statDocs.push(statDoc(rdoc));
+                if (statDocs.length >= 500) {
+                    await RecordModel.collStat.insertMany(statDocs, { ordered: false });
+                    statDocs = [];
+                }
+            }
+            if (statDocs.length) await RecordModel.collStat.insertMany(statDocs, { ordered: false });
+        }
+        return true;
+    },
 ];

@@ -755,6 +755,7 @@ problem.import.problem_description: '## 題目描述'
 problem.stats.sort.date: 提交時間
 problem.stats.sort.length: 程式碼長度
 problem.stats.sort.memory: 記憶體佔用
+problem.stats.sort.score: 分數
 problem.stats.sort.time: 執行時間
 Problems created in polyhedron can be directly imported into any Hydro based online judge system.: Polyhedron 中的題目可以直接匯入任何基於 Hydro 的線上測評系統。
 Problems Sets: 題庫

@@ -227,6 +227,8 @@ export interface RecordStatDoc {
     domainId: string;
     pid: number;
     uid: number;
+    status: number;
+    score: number;
     time: number;
     memory: number;
     length: number;
