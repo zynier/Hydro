@@ -2,11 +2,13 @@
 import { spawn } from 'child_process';
 import { createHash } from 'crypto';
 import path from 'path';
+import { GPULanguage } from '@hydrooj/common';
 import { findFileSync, fs } from '@hydrooj/utils';
 import { getConfig } from '../config';
 import { GPUDevice } from './index';
-
-export type GPULanguage = 'cuda' | 'tilelang';
+import {
+    isPythonGPULanguage, TILELANG_VERSION, TIRX_VERSION, TRITON_VERSION,
+} from './languages';
 
 export interface NormalizedGPUCase {
     id: number;
@@ -90,6 +92,9 @@ CASE_CONFIGS = {item["id"]: item for item in ${JSON.stringify(cases)}}
 DEFAULT_WARMUP = 100
 DEFAULT_REPEATS = 2000
 PROFILE_MEASURE_RUN = ${profileMeasureRun}
+TILELANG_VERSION = ${JSON.stringify(TILELANG_VERSION)}
+TIRX_VERSION = ${JSON.stringify(TIRX_VERSION)}
+TRITON_VERSION = ${JSON.stringify(TRITON_VERSION)}
 
 
 def load_testcase_config():
@@ -188,16 +193,48 @@ def as_ctype(value):
 
 
 def load_python_kernel():
-    try:
-        import tilelang
-    except ImportError as error:
-        raise RuntimeError("TileLang 0.1.13 is not installed in the GPU judge image") from error
-    version = str(getattr(tilelang, "__version__", ""))
-    if version != "0.1.13":
-        raise RuntimeError(f"GPU judge requires TileLang 0.1.13, found {version or 'unknown'}")
+    if LANGUAGE == "tilelang":
+        try:
+            import tilelang
+        except ImportError as error:
+            raise RuntimeError(
+                f"TileLang {TILELANG_VERSION} is not installed in the GPU judge image"
+            ) from error
+        version = str(getattr(tilelang, "__version__", ""))
+        if version != TILELANG_VERSION:
+            raise RuntimeError(
+                f"GPU judge requires TileLang {TILELANG_VERSION}, found {version or 'unknown'}"
+            )
+    elif LANGUAGE == "tirx":
+        try:
+            import tvm
+            import tvm.tirx
+        except ImportError as error:
+            raise RuntimeError(
+                f"Apache TVM/TIRx {TIRX_VERSION} is not installed in the GPU judge image"
+            ) from error
+        version = str(getattr(tvm, "__version__", ""))
+        if version != TIRX_VERSION:
+            raise RuntimeError(
+                f"GPU judge requires Apache TVM/TIRx {TIRX_VERSION}, found {version or 'unknown'}"
+            )
+    elif LANGUAGE == "triton":
+        try:
+            import triton
+        except ImportError as error:
+            raise RuntimeError(
+                f"Triton {TRITON_VERSION} is not installed in the GPU judge image"
+            ) from error
+        version = str(getattr(triton, "__version__", ""))
+        if version != TRITON_VERSION:
+            raise RuntimeError(
+                f"GPU judge requires Triton {TRITON_VERSION}, found {version or 'unknown'}"
+            )
+    else:
+        raise RuntimeError(f"Unsupported Python GPU language: {LANGUAGE}")
     spec = importlib.util.spec_from_file_location("hydro_gpu_submission", "/work/submission.py")
     if spec is None or spec.loader is None:
-        raise RuntimeError("Unable to load TileLang submission.py")
+        raise RuntimeError(f"Unable to load {LANGUAGE} submission.py")
     module = importlib.util.module_from_spec(spec)
     sys.path.insert(0, "/work")
     try:
@@ -214,7 +251,7 @@ def load_python_kernel():
 
 
 def load_kernel():
-    if LANGUAGE == "tilelang":
+    if LANGUAGE != "cuda":
         return load_python_kernel()
     library = ctypes.CDLL("/work/submission.so")
     try:
@@ -436,7 +473,7 @@ if __name__ == "__main__":
 }
 
 function compileScript(computeCapability: string, language: GPULanguage, profile = false) {
-    if (language === 'tilelang') {
+    if (isPythonGPULanguage(language)) {
         return `#!/bin/bash
 set -eu
 python3 -m py_compile /work/submission.py
@@ -512,7 +549,7 @@ export async function prepareGPUWorkdir(
 ) {
     const profileMeasureRun = options.profileMeasureRun || 1;
     const writes: Promise<any>[] = [
-        fs.writeFile(path.join(workdir, language === 'tilelang' ? 'submission.py' : 'submission.cu'), code),
+        fs.writeFile(path.join(workdir, isPythonGPULanguage(language) ? 'submission.py' : 'submission.cu'), code),
         fs.copy(testcase, path.join(workdir, 'testcase_config.py')),
         fs.writeFile(path.join(workdir, 'runner.py'), runnerSource(entry, cases, language, profileMeasureRun), { mode: 0o700 }),
         fs.writeFile(path.join(workdir, 'compile.sh'), compileScript(device.computeCapability, language, options.profile), { mode: 0o700 }),
@@ -574,14 +611,43 @@ export function parseResults(stdout: string): GPUBenchmarkResult[] {
     return [...results.values()];
 }
 
-function gpuContainerArgs(name: string, language: GPULanguage, tmpfsSize = '1g') {
+let rootlessRuntimePromise: Promise<boolean>;
+
+function isRootlessRuntime() {
+    if (rootlessRuntimePromise) return rootlessRuntimePromise;
+    const runtime = getConfig('gpu').runtime;
+    rootlessRuntimePromise = new Promise<boolean>((resolve) => {
+        const child = spawn(runtime, ['info', '--format', '{{json .SecurityOptions}}'], {
+            stdio: ['ignore', 'pipe', 'ignore'],
+        });
+        let stdout = '';
+        let settled = false;
+        let timer: NodeJS.Timeout;
+        const finish = (value: boolean) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(value);
+        };
+        timer = setTimeout(() => {
+            child.kill('SIGKILL');
+            finish(false);
+        }, 10000);
+        child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8'); });
+        child.on('error', () => finish(false));
+        child.on('close', (code) => finish(code === 0 && /rootless/i.test(stdout)));
+    });
+    return rootlessRuntimePromise;
+}
+
+function gpuContainerArgs(name: string, language: GPULanguage, tmpfsSize = '1g', rootless = false) {
     const config = getConfig('gpu');
     return [
         'run', '--rm', '--init', '--name', name,
-        '--user', `${process.getuid?.() ?? 65534}:${process.getgid?.() ?? 65534}`,
+        '--user', rootless ? '0:0' : `${process.getuid?.() ?? 65534}:${process.getgid?.() ?? 65534}`,
         '--network', 'none',
         '--read-only',
-        // TileLang JIT and Nsight Compute use executable temporary files.
+        // Python GPU JITs and Nsight Compute use executable temporary files.
         '--tmpfs', `/tmp:rw,nosuid,nodev,exec,size=${tmpfsSize}`,
         '--cap-drop', 'ALL',
         '--security-opt', 'no-new-privileges',
@@ -593,6 +659,12 @@ function gpuContainerArgs(name: string, language: GPULanguage, tmpfsSize = '1g')
         '--env', 'PYTHONDONTWRITEBYTECODE=1',
         '--env', `HYDRO_GPU_LANGUAGE=${language}`,
     ];
+}
+
+function gpuDeviceArgs(device: GPUDevice, rootless: boolean) {
+    return rootless
+        ? ['--device', `nvidia.com/gpu=${device.uuid}`]
+        : ['--gpus', `device=${device.uuid}`];
 }
 
 async function runOCIContainer(name: string, args: string[], timeout: number) {
@@ -641,10 +713,11 @@ export async function runGPUContainer(
     language: GPULanguage = 'cuda',
 ): Promise<GPUContainerResult> {
     const config = getConfig('gpu');
+    const rootless = await isRootlessRuntime();
     const safeRid = rid.replace(/[^A-Za-z0-9_.-]/g, '').slice(-24);
     const compileName = `hydro-gpu-compile-${safeRid}-${randomSuffix()}`;
     const compile = await runOCIContainer(compileName, [
-        ...gpuContainerArgs(compileName, language),
+        ...gpuContainerArgs(compileName, language, '1g', rootless),
         '--volume', `${workdir}:/work:rw`,
         '--workdir', '/work',
         config.container_image,
@@ -675,8 +748,8 @@ export async function runGPUContainer(
         }
         const name = `hydro-gpu-case-${test.id}-${safeRid}-${randomSuffix()}`;
         const execution = await runOCIContainer(name, [
-            ...gpuContainerArgs(name, language),
-            '--gpus', `device=${device.uuid}`,
+            ...gpuContainerArgs(name, language, '1g', rootless),
+            ...gpuDeviceArgs(device, rootless),
             '--env', 'NVIDIA_DRIVER_CAPABILITIES=compute,utility',
             '--volume', `${workdir}:/work:ro`,
             '--workdir', '/work',
@@ -701,6 +774,7 @@ export async function runGPUProfiles(
     onResult?: (result: GPUProfileArtifactResult) => Promise<void> | void,
 ) {
     const config = getConfig('gpu');
+    const rootless = await isRootlessRuntime();
     const safeRid = rid.replace(/[^A-Za-z0-9_.-]/g, '').slice(-24);
     const profileDir = path.join(workdir, 'profile');
     await fs.ensureDir(profileDir);
@@ -712,7 +786,7 @@ export async function runGPUProfiles(
 
     const compileName = `hydro-gpu-profile-compile-${safeRid}-${randomSuffix()}`;
     const compile = await runOCIContainer(compileName, [
-        ...gpuContainerArgs(compileName, language, config.profile_tmpfs),
+        ...gpuContainerArgs(compileName, language, config.profile_tmpfs, rootless),
         '--volume', `${workdir}:/work:rw`,
         '--workdir', '/work',
         config.container_image,
@@ -735,8 +809,8 @@ export async function runGPUProfiles(
     for (const test of cases) {
         const name = `hydro-gpu-profile-${test.id}-${safeRid}-${randomSuffix()}`;
         const execution = await runOCIContainer(name, [
-            ...gpuContainerArgs(name, language, config.profile_tmpfs),
-            '--gpus', `device=${device.uuid}`,
+            ...gpuContainerArgs(name, language, config.profile_tmpfs, rootless),
+            ...gpuDeviceArgs(device, rootless),
             '--env', 'NVIDIA_DRIVER_CAPABILITIES=compute,utility',
             '--volume', `${workdir}:/work:ro`,
             '--volume', `${profileDir}:/profile:rw`,

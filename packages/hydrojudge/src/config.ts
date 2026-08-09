@@ -53,7 +53,7 @@ export const JudgeSettings = Schema.object({
         enabled: Schema.boolean().default(true).description('Enable native GPU operator judge'),
         runtime: Schema.string().default('docker').description('OCI container runtime executable'),
         container_image: Schema.string().default('pytorch/pytorch:2.13.0-cuda13.0-cudnn9-devel')
-            .description('PyTorch CUDA image; build packages/hydrojudge/gpu for TileLang 0.1.13 support'),
+            .description('PyTorch CUDA image; build packages/hydrojudge/gpu for pinned TileLang, TIRx, and Triton support'),
         nvidia_smi: Schema.string().default('nvidia-smi'),
         nvcc: Schema.string().default('nvcc'),
         lock_dir: Schema.string().default(path.resolve(os.tmpdir(), 'hydro', 'gpu-locks')),

@@ -1,13 +1,15 @@
 import { randomBytes } from 'crypto';
 import os from 'os';
 import path from 'path';
-import { GPUProfileState, GPUProfileTiming, STATUS } from '@hydrooj/common';
+import {
+    GPULanguage, GPUProfileState, GPUProfileTiming, STATUS,
+} from '@hydrooj/common';
 import { fs } from '@hydrooj/utils';
 import { getConfig } from '../config';
 import { CompileError } from '../error';
 import { gpuPool, theoreticalLowerBoundMs } from '../gpu';
 import {
-    GPULanguage, NormalizedGPUCase, prepareGPUWorkdir, runGPUContainer, runGPUProfiles,
+    NormalizedGPUCase, prepareGPUWorkdir, runGPUContainer, runGPUProfiles,
 } from '../gpu/runner';
 import logger from '../log';
 import { Context } from './interface';

@@ -156,8 +156,85 @@ describe('GPU operator judge', () => {
             expect(await fs.pathExists(path.join(folder, 'submission.py'))).to.equal(true);
             expect(compile).to.include('python3 -m py_compile /work/submission.py');
             expect(compile).to.not.include('nvcc');
-            expect(runner).to.include('GPU judge requires TileLang 0.1.13');
+            expect(runner).to.include('TILELANG_VERSION = "0.1.13"');
+            expect(runner).to.include('GPU judge requires TileLang {TILELANG_VERSION}');
             expect(runner).to.include('Missing Python function');
+            expect(runner).to.include('def run_profile_case(module, kernel, case_id):');
+        } finally {
+            await fs.remove(folder);
+        }
+    });
+
+    it('generates a pinned TIRx Python runner and syntax-only build step', async () => {
+        const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'hydro-gpu-tirx-test-'));
+        try {
+            const testcase = path.join(folder, 'trusted-testcase.py');
+            await fs.writeFile(testcase, '# trusted testcase definition\n');
+            await prepareGPUWorkdir(
+                folder,
+                'def run_kernel(*args):\n    pass\n',
+                testcase,
+                'run_kernel',
+                [{ id: 1, memory: 512, warmup: 3, repeats: 30 }],
+                {
+                    index: 0,
+                    uuid: 'GPU-0',
+                    name: 'Example GPU',
+                    computeCapability: '10.0',
+                    memoryMiB: 180000,
+                    freeMemoryMiB: 170000,
+                    bandwidthGBps: 7000,
+                    fp32TFLOPS: 70,
+                    pciBusId: '0000:01:00.0',
+                },
+                'tirx',
+            );
+            const compile = await fs.readFile(path.join(folder, 'compile.sh'), 'utf8');
+            const runner = await fs.readFile(path.join(folder, 'runner.py'), 'utf8');
+            expect(await fs.pathExists(path.join(folder, 'submission.py'))).to.equal(true);
+            expect(compile).to.include('python3 -m py_compile /work/submission.py');
+            expect(compile).to.not.include('nvcc');
+            expect(runner).to.include('TIRX_VERSION = "0.25.0.post1"');
+            expect(runner).to.include('import tvm.tirx');
+            expect(runner).to.include('GPU judge requires Apache TVM/TIRx {TIRX_VERSION}');
+            expect(runner).to.include('def run_profile_case(module, kernel, case_id):');
+        } finally {
+            await fs.remove(folder);
+        }
+    });
+
+    it('generates a pinned Triton Python runner and syntax-only build step', async () => {
+        const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'hydro-gpu-triton-test-'));
+        try {
+            const testcase = path.join(folder, 'trusted-testcase.py');
+            await fs.writeFile(testcase, '# trusted testcase definition\n');
+            await prepareGPUWorkdir(
+                folder,
+                'def run_kernel(*args):\n    pass\n',
+                testcase,
+                'run_kernel',
+                [{ id: 1, memory: 512, warmup: 3, repeats: 30 }],
+                {
+                    index: 0,
+                    uuid: 'GPU-0',
+                    name: 'Example GPU',
+                    computeCapability: '10.0',
+                    memoryMiB: 180000,
+                    freeMemoryMiB: 170000,
+                    bandwidthGBps: 7000,
+                    fp32TFLOPS: 70,
+                    pciBusId: '0000:01:00.0',
+                },
+                'triton',
+            );
+            const compile = await fs.readFile(path.join(folder, 'compile.sh'), 'utf8');
+            const runner = await fs.readFile(path.join(folder, 'runner.py'), 'utf8');
+            expect(await fs.pathExists(path.join(folder, 'submission.py'))).to.equal(true);
+            expect(compile).to.include('python3 -m py_compile /work/submission.py');
+            expect(compile).to.not.include('nvcc');
+            expect(runner).to.include('TRITON_VERSION = "3.7.1"');
+            expect(runner).to.include('import triton');
+            expect(runner).to.include('GPU judge requires Triton {TRITON_VERSION}');
             expect(runner).to.include('def run_profile_case(module, kernel, case_id):');
         } finally {
             await fs.remove(folder);
@@ -277,6 +354,60 @@ gpu:
                 isSelfSubmission: false,
                 trusted: false,
                 lang: 'tilelang',
+            });
+            expect(config.count).to.equal(1);
+            expect(config.gpu).to.include({ entry: 'run_kernel', testcase: 'testcase_config.py' });
+        } finally {
+            await fs.remove(folder);
+        }
+    });
+
+    it('accepts TIRx as a GPU operator language', async () => {
+        const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'hydro-gpu-tirx-config-test-'));
+        try {
+            await fs.writeFile(path.join(folder, 'testcase_config.py'), '# trusted testcase definition\n');
+            await fs.writeFile(path.join(folder, 'config.yaml'), `
+type: gpu
+langs: [tirx]
+time: 10s
+memory: 512m
+gpu:
+  cases:
+    - id: 7
+`);
+            const config = await readCases(folder, { type: 'gpu' }, {
+                next: () => null,
+                key: '',
+                isSelfSubmission: false,
+                trusted: false,
+                lang: 'tirx',
+            });
+            expect(config.count).to.equal(1);
+            expect(config.gpu).to.include({ entry: 'run_kernel', testcase: 'testcase_config.py' });
+        } finally {
+            await fs.remove(folder);
+        }
+    });
+
+    it('accepts Triton as a GPU operator language', async () => {
+        const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'hydro-gpu-triton-config-test-'));
+        try {
+            await fs.writeFile(path.join(folder, 'testcase_config.py'), '# trusted testcase definition\n');
+            await fs.writeFile(path.join(folder, 'config.yaml'), `
+type: gpu
+langs: [triton]
+time: 10s
+memory: 512m
+gpu:
+  cases:
+    - id: 7
+`);
+            const config = await readCases(folder, { type: 'gpu' }, {
+                next: () => null,
+                key: '',
+                isSelfSubmission: false,
+                trusted: false,
+                lang: 'triton',
             });
             expect(config.count).to.equal(1);
             expect(config.gpu).to.include({ entry: 'run_kernel', testcase: 'testcase_config.py' });

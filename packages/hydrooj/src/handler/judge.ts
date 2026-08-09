@@ -5,7 +5,7 @@ import { omit } from 'lodash';
 import { ObjectId } from 'mongodb';
 import sanitize from 'sanitize-filename';
 import {
-    GPUProfileState, JudgeMeta, JudgeResultBody, ProblemConfigFile, TestCase,
+    GPU_LANGUAGES, GPULanguage, GPUProfileState, JudgeMeta, JudgeResultBody, ProblemConfigFile, TestCase,
 } from '@hydrooj/common';
 import { sleep } from '@hydrooj/utils';
 import { Context } from '../context';
@@ -282,7 +282,7 @@ export async function processGPUProfileCallback(
     if (!Number.isSafeInteger(caseId) || caseId <= 0) throw new ValidationError('caseId');
     if (!profile || !/^[a-f0-9]{32}$/.test(profile.id)) throw new ValidationError('profile');
     if (!['pending', 'ready', 'error'].includes(profile.status)) throw new ValidationError('profile');
-    if (!['cuda', 'tilelang'].includes(profile.language)) throw new ValidationError('profile');
+    if (!GPU_LANGUAGES.includes(profile.language as GPULanguage)) throw new ValidationError('profile');
     const rdoc = await record.get(rid);
     if (!rdoc) return false;
     const field = `gpuProfiles.${caseId}`;

@@ -9,6 +9,7 @@ import { Filter, ObjectId } from 'mongodb';
 import { nanoid } from 'nanoid';
 import sanitize from 'sanitize-filename';
 import Schema from 'schemastery';
+import { GPU_LANGUAGES, GPULanguage } from '@hydrooj/common';
 import parser from '@hydrooj/utils/lib/search';
 import { randomstring, sortFiles, streamToBuffer } from '@hydrooj/utils/lib/utils';
 import type { Context } from '../context';
@@ -497,7 +498,7 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
         const config = this.pdoc.config;
         if (typeof config === 'string' || config === null) throw new ProblemConfigError();
         if (config.type === 'gpu') {
-            if (!['cuda', 'tilelang'].includes(lang)
+            if (!GPU_LANGUAGES.includes(lang as GPULanguage)
                 || (Array.isArray(config.langs) && config.langs.length > 0 && !config.langs.includes(lang))) {
                 throw new ProblemNotAllowLanguageError();
             }

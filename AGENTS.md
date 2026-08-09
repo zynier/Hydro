@@ -12,7 +12,7 @@
 - Hydro 文件存储：`/data0/shared/dongwu.chen/.hydro-conda/file`
 - MongoDB 数据：`/data0/shared/dongwu.chen/.hydro-conda/mongodb`
 - 用户级 systemd 单元：`hydro-conda.service`
-- 当前版本：HydroOJ `5.0.4`、Node.js `22.21.1`、MongoDB `7.0.34`、Go Judge `v1.12.2`
+- 当前版本：HydroOJ `5.0.4`、Node.js `22.21.1`、MongoDB `7.0.34`、Go Judge `v1.12.2`、TileLang `0.1.13`、Apache TVM/TIRx `0.25.0.post1`、Triton `3.7.1`
 
 当前由 PM2 管理三个进程：
 

@@ -1,6 +1,6 @@
 import path from 'path';
 import {
-    convertIniConfig, LangConfig, normalizeSubtasks, ProblemConfigFile, readSubtasksFromFiles,
+    convertIniConfig, GPU_LANGUAGES, GPULanguage, LangConfig, normalizeSubtasks, ProblemConfigFile, readSubtasksFromFiles,
 } from '@hydrooj/common';
 import { readYamlCases } from '@hydrooj/common/cases';
 import {
@@ -8,6 +8,7 @@ import {
 } from '@hydrooj/utils';
 import { getConfig } from './config';
 import { FormatError, SystemError } from './error';
+import { TILELANG_VERSION, TIRX_VERSION, TRITON_VERSION } from './gpu/languages';
 import { NextFunction, ParsedConfig } from './interface';
 import { ensureFile, parseMemoryMB } from './utils';
 
@@ -68,9 +69,11 @@ interface Args {
 
 function normalizeGPUConfig(folder: string, config: Record<string, any>, args: Args): ParsedConfig {
     const allowedLanguages = Array.isArray(config.langs) ? config.langs : [];
-    if (!['cuda', 'tilelang'].includes(args.lang)
+    if (!GPU_LANGUAGES.includes(args.lang as GPULanguage)
         || (allowedLanguages.length > 0 && !allowedLanguages.includes(args.lang))) {
-        throw new FormatError('GPU operator problems only support CUDA C++ and TileLang 0.1.13.');
+        throw new FormatError(
+            `GPU operator problems only support CUDA C++, TileLang ${TILELANG_VERSION}, TIRx ${TIRX_VERSION}, and Triton ${TRITON_VERSION}.`,
+        );
     }
     const gpu = config.gpu;
     if (!gpu || typeof gpu !== 'object') throw new FormatError('GPU configuration is required.');

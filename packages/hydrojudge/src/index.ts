@@ -5,6 +5,7 @@ import {
 } from 'hydrooj';
 import { JudgeSettings, overrideConfig } from './config';
 import { registerGPUExample } from './example';
+import { TILELANG_VERSION, TIRX_VERSION, TRITON_VERSION } from './gpu/languages';
 
 export const Config = JudgeSettings;
 
@@ -34,8 +35,36 @@ async function ensureGPULanguages() {
             execute: 'echo "TileLang is only available for GPU operator problems"',
             highlight: 'python',
             monaco: 'python',
-            display: 'TileLang 0.1.13',
-            version: '0.1.13',
+            display: `TileLang ${TILELANG_VERSION}`,
+            version: TILELANG_VERSION,
+            hidden: true,
+            process_limit: 1,
+        };
+        updated = yaml.dump(languages);
+    }
+    if (!languages.tirx) {
+        languages.tirx = {
+            compile: 'echo "TIRx is only available for GPU operator problems"',
+            code_file: 'submission.tirx.py',
+            execute: 'echo "TIRx is only available for GPU operator problems"',
+            highlight: 'python',
+            monaco: 'python',
+            display: `TIRx ${TIRX_VERSION}`,
+            version: TIRX_VERSION,
+            hidden: true,
+            process_limit: 1,
+        };
+        updated = yaml.dump(languages);
+    }
+    if (!languages.triton) {
+        languages.triton = {
+            compile: 'echo "Triton is only available for GPU operator problems"',
+            code_file: 'submission.triton.py',
+            execute: 'echo "Triton is only available for GPU operator problems"',
+            highlight: 'python',
+            monaco: 'python',
+            display: `Triton ${TRITON_VERSION}`,
+            version: TRITON_VERSION,
             hidden: true,
             process_limit: 1,
         };

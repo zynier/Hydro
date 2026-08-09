@@ -13,6 +13,9 @@ export enum ProblemType {
     Remote = 'remote_judge',
 }
 
+export const GPU_LANGUAGES = ['cuda', 'tilelang', 'tirx', 'triton'] as const;
+export type GPULanguage = typeof GPU_LANGUAGES[number];
+
 export interface GPUCaseConfig {
     id?: number;
     memory?: string;
@@ -119,7 +122,7 @@ export interface GPUProfileTiming {
 export interface GPUProfileState {
     id: string;
     status: 'pending' | 'ready' | 'error';
-    language: 'cuda' | 'tilelang';
+    language: GPULanguage;
     hardware: string;
     computeCapability: string;
     set: string;

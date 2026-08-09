@@ -16,6 +16,26 @@ tilelang:
   version: '0.1.13'
   hidden: true
   process_limit: 1
+tirx:
+  compile: echo "TIRx is only available for GPU operator problems"
+  code_file: submission.tirx.py
+  execute: echo "TIRx is only available for GPU operator problems"
+  highlight: python
+  monaco: python
+  display: TIRx 0.25.0.post1
+  version: 0.25.0.post1
+  hidden: true
+  process_limit: 1
+triton:
+  compile: echo "Triton is only available for GPU operator problems"
+  code_file: submission.triton.py
+  execute: echo "Triton is only available for GPU operator problems"
+  highlight: python
+  monaco: python
+  display: Triton 3.7.1
+  version: 3.7.1
+  hidden: true
+  process_limit: 1
 pas:
   compile: /usr/bin/fpc -O2 -ofoo foo.pas
 java:

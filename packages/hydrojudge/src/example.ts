@@ -8,7 +8,7 @@ import {
 export function registerGPUExample(ctx: Context) {
     return ctx.addScript(
         'gpuExample',
-        'Install the bundled CUDA C++ a += b GPU operator problem.',
+        'Install the bundled CUDA, TileLang, TIRx, and Triton a += b GPU operator problem.',
         Schema.object({
             domainId: Schema.string().default('system'),
             pid: Schema.string().default('GPU1'),
@@ -26,13 +26,15 @@ export function registerGPUExample(ctx: Context) {
             if (pdoc && !force) throw new Error(`Problem ${domainId}/${pid} already exists. Pass force=true to update it.`);
             if (pdoc) {
                 pdoc = await ProblemModel.edit(domainId, pdoc.docId, {
-                    title: 'a += b',
+                    title: 'a += b (fp16)',
                     content,
-                    tag: ['GPU', 'CUDA', 'TileLang'],
+                    tag: ['GPU', 'CUDA', 'TileLang', 'TIRx', 'Triton'],
                     html: false,
                 });
             } else {
-                const docId = await ProblemModel.add(domainId, pid, 'a += b', content, owner, ['GPU', 'CUDA', 'TileLang']);
+                const docId = await ProblemModel.add(
+                    domainId, pid, 'a += b (fp16)', content, owner, ['GPU', 'CUDA', 'TileLang', 'TIRx', 'Triton'],
+                );
                 pdoc = await ProblemModel.get(domainId, docId);
             }
             await Promise.all([
