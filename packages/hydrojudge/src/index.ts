@@ -8,7 +8,7 @@ import { registerGPUExample } from './example';
 
 export const Config = JudgeSettings;
 
-async function ensureCudaLanguage() {
+async function ensureGPULanguages() {
     const raw = SystemModel.get('hydrooj.langs');
     if (typeof raw !== 'string') return;
     const languages = yaml.load(raw) as Record<string, any>;
@@ -26,14 +26,28 @@ async function ensureCudaLanguage() {
             process_limit: 1,
         };
         updated = yaml.dump(languages);
-        await SystemModel.set('hydrooj.langs', updated);
     }
+    if (!languages.tilelang) {
+        languages.tilelang = {
+            compile: 'echo "TileLang is only available for GPU operator problems"',
+            code_file: 'submission.tilelang.py',
+            execute: 'echo "TileLang is only available for GPU operator problems"',
+            highlight: 'python',
+            monaco: 'python',
+            display: 'TileLang 0.1.13',
+            version: '0.1.13',
+            hidden: true,
+            process_limit: 1,
+        };
+        updated = yaml.dump(languages);
+    }
+    if (updated !== raw) await SystemModel.set('hydrooj.langs', updated);
     Object.assign(SettingModel.langs, parseLang(updated));
 }
 
 export async function apply(ctx: Context, config: ReturnType<typeof Config>) {
     overrideConfig(config);
-    await ensureCudaLanguage();
+    await ensureGPULanguages();
     registerGPUExample(ctx);
     if (process.env.NODE_APP_INSTANCE !== '0') return;
     // eslint-disable-next-line consistent-return

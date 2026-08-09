@@ -67,7 +67,11 @@ interface Args {
 }
 
 function normalizeGPUConfig(folder: string, config: Record<string, any>, args: Args): ParsedConfig {
-    if (args.lang !== 'cuda') throw new FormatError('GPU operator problems only support CUDA C++.');
+    const allowedLanguages = Array.isArray(config.langs) ? config.langs : [];
+    if (!['cuda', 'tilelang'].includes(args.lang)
+        || (allowedLanguages.length > 0 && !allowedLanguages.includes(args.lang))) {
+        throw new FormatError('GPU operator problems only support CUDA C++ and TileLang 0.1.13.');
+    }
     const gpu = config.gpu;
     if (!gpu || typeof gpu !== 'object') throw new FormatError('GPU configuration is required.');
     const entry = gpu.entry || 'run_kernel';

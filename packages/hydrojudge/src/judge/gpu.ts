@@ -5,7 +5,7 @@ import { fs } from '@hydrooj/utils';
 import { CompileError } from '../error';
 import { gpuPool, theoreticalLowerBoundMs } from '../gpu';
 import {
-    NormalizedGPUCase, prepareGPUWorkdir, runGPUContainer,
+    GPULanguage, NormalizedGPUCase, prepareGPUWorkdir, runGPUContainer,
 } from '../gpu/runner';
 import { Context } from './interface';
 
@@ -48,13 +48,14 @@ export function gpuPerformanceScore(kernelTimeMs: number, baselineTimeMs: number
     return Math.min(150, 100 + 10 * Math.log2(rawScore / 100));
 }
 
-async function readSubmissionCode(ctx: Context) {
+async function readSubmissionCode(ctx: Context, language: string) {
     if ('content' in ctx.code) return ctx.code.content;
     if ('src' in ctx.code) return await fs.readFile(ctx.code.src);
-    throw new CompileError({ stderr: 'CUDA C++ submission source is unavailable.' });
+    throw new CompileError({ stderr: `${language} submission source is unavailable.` });
 }
 
 export const judge = async (ctx: Context) => {
+    const language = ctx.lang as GPULanguage;
     const cases = ctx.config.gpu.cases as unknown as NormalizedGPUCase[];
     const requestedHardware = ctx.request.hardware || '';
     const minimumMemory = Math.max(...cases.map((test) => test.memory));
@@ -66,19 +67,20 @@ export const judge = async (ctx: Context) => {
         await ctx.pushClean(() => fs.remove(workdir));
         await prepareGPUWorkdir(
             workdir,
-            await readSubmissionCode(ctx),
+            await readSubmissionCode(ctx, ctx.lang),
             path.join(ctx.folder, ctx.config.gpu.testcase),
             ctx.config.gpu.entry,
             cases,
             lease.device,
+            language,
         );
         ctx.next({
             status: STATUS.STATUS_JUDGING,
             progress: 0,
             message: `Assigned ${lease.device.name} (${lease.device.uuid}, compute capability ${lease.device.computeCapability}).`,
         });
-        const execution = await runGPUContainer(workdir, lease.device, ctx.rid, ctx.config.time, cases);
-        if (execution.timeout === 'compile') throw new CompileError({ stderr: 'CUDA compilation timed out.' });
+        const execution = await runGPUContainer(workdir, lease.device, ctx.rid, ctx.config.time, cases, language);
+        if (execution.timeout === 'compile') throw new CompileError({ stderr: `${language} compilation timed out.` });
         if (!execution.compiled) throw new CompileError({ stdout: execution.stdout, stderr: execution.stderr });
         if (execution.timeout === 'execute') {
             ctx.end({ status: STATUS.STATUS_TIME_LIMIT_EXCEEDED, score: 0, time: 0, memory: 0 });

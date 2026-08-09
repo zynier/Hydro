@@ -497,7 +497,10 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
         const config = this.pdoc.config;
         if (typeof config === 'string' || config === null) throw new ProblemConfigError();
         if (config.type === 'gpu') {
-            if (lang !== 'cuda') throw new ProblemNotAllowLanguageError();
+            if (!['cuda', 'tilelang'].includes(lang)
+                || (Array.isArray(config.langs) && config.langs.length > 0 && !config.langs.includes(lang))) {
+                throw new ProblemNotAllowLanguageError();
+            }
             const available = (this.ctx as any).gpu?.hardware?.() || [];
             if (hardware && !available.some((item) => item.id === hardware)) throw new ValidationError('hardware');
         } else if (['submit_answer', 'objective'].includes(config.type)) {

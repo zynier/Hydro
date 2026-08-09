@@ -6,6 +6,16 @@ cuda:
   compile: echo "CUDA C++ is only available for GPU operator problems"
   code_file: submission.cu
   execute: echo "CUDA C++ is only available for GPU operator problems"
+tilelang:
+  compile: echo "TileLang is only available for GPU operator problems"
+  code_file: submission.tilelang.py
+  execute: echo "TileLang is only available for GPU operator problems"
+  highlight: python
+  monaco: python
+  display: TileLang 0.1.13
+  version: '0.1.13'
+  hidden: true
+  process_limit: 1
 pas:
   compile: /usr/bin/fpc -O2 -ofoo foo.pas
 java:

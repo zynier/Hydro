@@ -127,6 +127,42 @@ describe('GPU operator judge', () => {
         }
     });
 
+    it('generates a TileLang Python runner and syntax-only build step', async () => {
+        const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'hydro-gpu-tilelang-test-'));
+        try {
+            const testcase = path.join(folder, 'trusted-testcase.py');
+            await fs.writeFile(testcase, '# trusted testcase definition\n');
+            await prepareGPUWorkdir(
+                folder,
+                'def run_kernel(*args):\n    pass\n',
+                testcase,
+                'run_kernel',
+                [{ id: 1, memory: 512, warmup: 3, repeats: 30 }],
+                {
+                    index: 0,
+                    uuid: 'GPU-0',
+                    name: 'Example GPU',
+                    computeCapability: '9.0',
+                    memoryMiB: 81920,
+                    freeMemoryMiB: 80000,
+                    bandwidthGBps: 2000,
+                    fp32TFLOPS: 50,
+                    pciBusId: '0000:01:00.0',
+                },
+                'tilelang',
+            );
+            const compile = await fs.readFile(path.join(folder, 'compile.sh'), 'utf8');
+            const runner = await fs.readFile(path.join(folder, 'runner.py'), 'utf8');
+            expect(await fs.pathExists(path.join(folder, 'submission.py'))).to.equal(true);
+            expect(compile).to.include('python3 -m py_compile /work/submission.py');
+            expect(compile).to.not.include('nvcc');
+            expect(runner).to.include('GPU judge requires TileLang 0.1.13');
+            expect(runner).to.include('Missing Python function');
+        } finally {
+            await fs.remove(folder);
+        }
+    });
+
     it('normalizes a GPU config without input/output files', async () => {
         const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'hydro-gpu-config-test-'));
         try {
@@ -157,6 +193,33 @@ gpu:
                 warmup: 3,
                 repeats: 30,
             });
+        } finally {
+            await fs.remove(folder);
+        }
+    });
+
+    it('accepts TileLang as a GPU operator language', async () => {
+        const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'hydro-gpu-tilelang-config-test-'));
+        try {
+            await fs.writeFile(path.join(folder, 'testcase_config.py'), '# trusted testcase definition\n');
+            await fs.writeFile(path.join(folder, 'config.yaml'), `
+type: gpu
+langs: [tilelang]
+time: 10s
+memory: 512m
+gpu:
+  cases:
+    - id: 7
+`);
+            const config = await readCases(folder, { type: 'gpu' }, {
+                next: () => null,
+                key: '',
+                isSelfSubmission: false,
+                trusted: false,
+                lang: 'tilelang',
+            });
+            expect(config.count).to.equal(1);
+            expect(config.gpu).to.include({ entry: 'run_kernel', testcase: 'testcase_config.py' });
         } finally {
             await fs.remove(folder);
         }

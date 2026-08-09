@@ -1,24 +1,31 @@
 # GPU operator judge
 
-Hydro's `gpu` problem type follows the XPUOJ operator workflow: trusted problem data generates CUDA tensors, defines a PyTorch baseline and checker, and describes the work used for roofline scoring. CUDA submissions export one C entry point and are measured on an exclusively scheduled NVIDIA GPU.
+Hydro's `gpu` problem type follows the XPUOJ operator workflow: trusted problem data generates CUDA tensors, defines a PyTorch baseline and checker, and describes the work used for roofline scoring. CUDA submissions export one C entry point, while TileLang 0.1.13 submissions export the same entry point as a Python function. Both are measured on an exclusively scheduled NVIDIA GPU.
 
 ## Prerequisites
 
 - NVIDIA driver and NVIDIA Container Toolkit.
 - An OCI runtime such as Docker.
-- A development image containing PyTorch with CUDA support, Python 3, and `nvcc`.
+- A development image containing PyTorch with CUDA support, Python 3, `nvcc`, and TileLang 0.1.13 when TileLang submissions are enabled.
 
-The default image is `pytorch/pytorch:2.13.0-cuda13.0-cudnn9-devel`. Verify the runtime before enabling submissions:
+The default base image is `pytorch/pytorch:2.13.0-cuda13.0-cudnn9-devel`. Build the bundled image to add the pinned TileLang runtime:
 
 ```bash
-docker run --rm --gpus all pytorch/pytorch:2.13.0-cuda13.0-cudnn9-devel \
-  python3 -c 'import torch; print(torch.__version__, torch.cuda.get_device_name())'
+docker build -t hydro-gpu-tilelang:0.1.13 packages/hydrojudge/gpu
 ```
 
-To use a locally managed image:
+Set `hydrojudge.gpu.container_image` to that tag and verify the runtime before enabling submissions:
 
 ```bash
-docker build -t hydro-gpu-pytorch:2.13 packages/hydrojudge/gpu
+docker run --rm --gpus all hydro-gpu-tilelang:0.1.13 \
+  python3 -c 'import torch, tilelang; print(torch.__version__, tilelang.__version__, torch.cuda.get_device_name())'
+```
+
+To use a different compatible base image:
+
+```bash
+docker build --build-arg PYTORCH_IMAGE=pytorch/pytorch:2.13.0-cuda13.0-cudnn9-devel \
+  -t hydro-gpu-tilelang-custom packages/hydrojudge/gpu
 ```
 
 Set `hydrojudge.gpu.container_image` to that tag. The other relevant judge settings are `runtime`, `nvidia_smi`, `nvcc`, `lock_dir`, `compile_timeout`, `execution_timeout`, `cpus`, `memory`, and `pids_limit`.
@@ -29,7 +36,7 @@ A GPU problem has a `config.yaml` and a trusted Python testcase definition. It d
 
 ```yaml
 type: gpu
-langs: [cuda]
+langs: [cuda, tilelang]
 time: 120s
 memory: 12g
 gpu:
@@ -71,6 +78,33 @@ extern "C" void run_kernel(__half* A, const __half* B, int64_t numel);
 The runner invokes this symbol directly. Submissions should launch work on the default CUDA stream and should not call `cudaDeviceSynchronize()`; the runner performs synchronization around warmup, timing, and checking.
 
 Submissions are compiled with `nvcc -O3 --use_fast_math --extra-device-vectorization`, `ptxas -O3`, host-side `-O3`, and the exact `sm_XX` plus PTX fallback targets for the assigned GPU. Problem checkers must account for the numerical behavior permitted by CUDA fast math.
+
+## TileLang entry point
+
+TileLang submissions are Python source files and must define the configured entry function (default `run_kernel`) with the same positional arguments as the CUDA ABI. The arguments are ordinary PyTorch CUDA tensors/scalars, so a submission follows the XPUOJ shape:
+
+```python
+import tilelang
+import tilelang.language as T
+from tilelang import jit
+
+real_kernel = None
+
+@jit
+def add(*args):
+    @T.prim_func
+    def kernel(*args):
+        ...
+    return kernel
+
+def run_kernel(A, B, numel):
+    global real_kernel
+    if real_kernel is None:
+        real_kernel = add(...)
+    real_kernel(A, B, numel)
+```
+
+The image must contain exactly `tilelang==0.1.13`; the runner checks this before importing the submission. A syntax-only Python compile is performed in the compile container. TileLang's shape-specialized JIT compilation occurs on the first invocation in the execution container and is therefore absorbed by the un-timed warmup. Subsequent invocations use the compiled callable. The function must enqueue work on PyTorch's default CUDA stream and must not call `cudaDeviceSynchronize()`.
 
 ## Measurement and correctness
 

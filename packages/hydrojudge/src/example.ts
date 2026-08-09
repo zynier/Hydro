@@ -28,11 +28,11 @@ export function registerGPUExample(ctx: Context) {
                 pdoc = await ProblemModel.edit(domainId, pdoc.docId, {
                     title: 'a += b',
                     content,
-                    tag: ['GPU', 'CUDA'],
+                    tag: ['GPU', 'CUDA', 'TileLang'],
                     html: false,
                 });
             } else {
-                const docId = await ProblemModel.add(domainId, pid, 'a += b', content, owner, ['GPU', 'CUDA']);
+                const docId = await ProblemModel.add(domainId, pid, 'a += b', content, owner, ['GPU', 'CUDA', 'TileLang']);
                 pdoc = await ProblemModel.get(domainId, docId);
             }
             await Promise.all([

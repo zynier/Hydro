@@ -6,6 +6,8 @@ import { fs } from '@hydrooj/utils';
 import { getConfig } from '../config';
 import { GPUDevice } from './index';
 
+export type GPULanguage = 'cuda' | 'tilelang';
+
 export interface NormalizedGPUCase {
     id: number;
     memory: number;
@@ -41,7 +43,7 @@ export interface GPUContainerResult {
     results: GPUBenchmarkResult[];
 }
 
-function runnerSource(entry: string, cases: NormalizedGPUCase[]) {
+function runnerSource(entry: string, cases: NormalizedGPUCase[], language: GPULanguage) {
     return String.raw`#!/usr/bin/env python3
 import contextlib
 import ctypes
@@ -60,6 +62,7 @@ import traceback
 import torch
 
 ENTRY = ${JSON.stringify(entry)}
+LANGUAGE = ${JSON.stringify(language)}
 CASE_CONFIGS = {item["id"]: item for item in ${JSON.stringify(cases)}}
 DEFAULT_WARMUP = 100
 DEFAULT_REPEATS = 2000
@@ -160,7 +163,35 @@ def as_ctype(value):
     raise TypeError(f"Unsupported kernel argument type: {type(value).__name__}")
 
 
+def load_python_kernel():
+    try:
+        import tilelang
+    except ImportError as error:
+        raise RuntimeError("TileLang 0.1.13 is not installed in the GPU judge image") from error
+    version = str(getattr(tilelang, "__version__", ""))
+    if version != "0.1.13":
+        raise RuntimeError(f"GPU judge requires TileLang 0.1.13, found {version or 'unknown'}")
+    spec = importlib.util.spec_from_file_location("hydro_gpu_submission", "/work/submission.py")
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Unable to load TileLang submission.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, "/work")
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.pop(0)
+    try:
+        function = getattr(module, ENTRY)
+    except AttributeError as error:
+        raise RuntimeError(f"Missing Python function: {ENTRY}") from error
+    if not callable(function):
+        raise RuntimeError(f"Python submission entry is not callable: {ENTRY}")
+    return module, function
+
+
 def load_kernel():
+    if LANGUAGE == "tilelang":
+        return load_python_kernel()
     library = ctypes.CDLL("/work/submission.so")
     try:
         function = getattr(library, ENTRY)
@@ -311,6 +342,7 @@ def main():
     nonce = secrets.token_hex(32)
     print(f"HYDRO_GPU_NONCE {case_id} {nonce}", flush=True)
     module = load_testcase_config()
+    torch.cuda.set_device(0)
     library, kernel = load_kernel()
     try:
         result = run_case(module, kernel, case_id)
@@ -338,7 +370,14 @@ if __name__ == "__main__":
 `;
 }
 
-function compileScript(computeCapability: string) {
+function compileScript(computeCapability: string, language: GPULanguage) {
+    if (language === 'tilelang') {
+        return `#!/bin/bash
+set -eu
+python3 -m py_compile /work/submission.py
+echo HYDRO_GPU_COMPILE_OK
+`;
+    }
     const arch = computeCapability.replace('.', '');
     return `#!/bin/bash
 set -eu
@@ -358,12 +397,13 @@ export async function prepareGPUWorkdir(
     entry: string,
     cases: NormalizedGPUCase[],
     device: GPUDevice,
+    language: GPULanguage = 'cuda',
 ) {
     await Promise.all([
-        fs.writeFile(path.join(workdir, 'submission.cu'), code),
+        fs.writeFile(path.join(workdir, language === 'tilelang' ? 'submission.py' : 'submission.cu'), code),
         fs.copy(testcase, path.join(workdir, 'testcase_config.py')),
-        fs.writeFile(path.join(workdir, 'runner.py'), runnerSource(entry, cases), { mode: 0o700 }),
-        fs.writeFile(path.join(workdir, 'compile.sh'), compileScript(device.computeCapability), { mode: 0o700 }),
+        fs.writeFile(path.join(workdir, 'runner.py'), runnerSource(entry, cases, language), { mode: 0o700 }),
+        fs.writeFile(path.join(workdir, 'compile.sh'), compileScript(device.computeCapability, language), { mode: 0o700 }),
     ]);
 }
 
@@ -409,6 +449,7 @@ export async function runGPUContainer(
     rid: string,
     executionTimeout: number,
     cases: NormalizedGPUCase[],
+    language: GPULanguage = 'cuda',
 ): Promise<GPUContainerResult> {
     const config = getConfig('gpu');
     const safeRid = rid.replace(/[^A-Za-z0-9_.-]/g, '').slice(-24);
@@ -417,7 +458,8 @@ export async function runGPUContainer(
         '--user', `${process.getuid?.() ?? 65534}:${process.getgid?.() ?? 65534}`,
         '--network', 'none',
         '--read-only',
-        '--tmpfs', '/tmp:rw,nosuid,nodev,size=1g',
+        // TileLang JIT loads its generated shared object from /tmp.
+        '--tmpfs', '/tmp:rw,nosuid,nodev,exec,size=1g',
         '--cap-drop', 'ALL',
         '--security-opt', 'no-new-privileges',
         '--pids-limit', config.pids_limit.toString(),
@@ -426,6 +468,7 @@ export async function runGPUContainer(
         '--ulimit', 'core=0',
         '--env', 'HOME=/tmp',
         '--env', 'PYTHONDONTWRITEBYTECODE=1',
+        '--env', `HYDRO_GPU_LANGUAGE=${language}`,
     ];
 
     const runContainer = async (name: string, args: string[], timeout: number) => await new Promise<{

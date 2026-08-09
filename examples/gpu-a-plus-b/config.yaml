@@ -1,6 +1,7 @@
 type: gpu
 langs:
   - cuda
+  - tilelang
 time: 120s
 memory: 12g
 gpu:
