@@ -4,7 +4,7 @@ import {
 import { Filter, ObjectId } from 'mongodb';
 import {
     ContestNotFoundError, HackRejudgeFailedError,
-    PermissionError, PretestRejudgeFailedError, ProblemConfigError,
+    NotFoundError, PermissionError, PretestRejudgeFailedError, ProblemConfigError,
     ProblemNotFoundError, RecordNotFoundError, UserNotFoundError,
 } from '../error';
 import { RecordDoc, Tdoc } from '../interface';
@@ -20,9 +20,137 @@ import user from '../model/user';
 import {
     ConnectionHandler, param, subscribe, Types,
 } from '../service/server';
-import { buildProjection, Time } from '../utils';
+import { buildProjection, streamToBuffer, Time } from '../utils';
 import { ContestDetailBaseHandler } from './contest';
 import { postJudge } from './judge';
+
+type GPUProfileView = 'overview' | 'section' | 'rules' | 'metrics' | 'metric' | 'source' | 'code';
+const GPU_PROFILE_VIEWS: GPUProfileView[] = ['overview', 'section', 'rules', 'metrics', 'metric', 'source', 'code'];
+
+const GPU_PROFILE_PAGE_SIZE = {
+    section: 100,
+    metrics: 50,
+    instances: 100,
+    source: 400,
+};
+const GPU_PROFILE_TEXT_PAGE_CHARS = 128 * 1024;
+
+function profileArray(value: any): any[] {
+    return Array.isArray(value) ? value : [];
+}
+
+function profilePage<T>(items: T[], requestedPage: number, pageSize: number) {
+    const totalItems = items.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+    const page = Math.min(Math.max(requestedPage || 1, 1), totalPages);
+    const offset = (page - 1) * pageSize;
+    return {
+        items: items.slice(offset, offset + pageSize),
+        page,
+        totalItems,
+        totalPages,
+        from: totalItems ? offset + 1 : 0,
+        to: Math.min(offset + pageSize, totalItems),
+    };
+}
+
+function profileTextPage(text: string, requestedPage: number) {
+    const lines = (text || '').split('\n');
+    const chunks: Array<{ from: number, to: number, text: string }> = [];
+    let current: string[] = [];
+    let currentChars = 0;
+    let currentFrom = 1;
+    const flush = (to: number) => {
+        if (!current.length) return;
+        chunks.push({ from: currentFrom, to, text: current.join('\n') });
+        current = [];
+        currentChars = 0;
+    };
+    for (let index = 0; index < lines.length; index++) {
+        const line = lines[index];
+        if (line.length > GPU_PROFILE_TEXT_PAGE_CHARS) {
+            flush(index);
+            for (let offset = 0; offset < line.length; offset += GPU_PROFILE_TEXT_PAGE_CHARS) {
+                chunks.push({
+                    from: index + 1,
+                    to: index + 1,
+                    text: line.slice(offset, offset + GPU_PROFILE_TEXT_PAGE_CHARS),
+                });
+            }
+            currentFrom = index + 2;
+            continue;
+        }
+        const nextChars = currentChars + line.length + (current.length ? 1 : 0);
+        if (current.length && (current.length >= GPU_PROFILE_PAGE_SIZE.source
+            || nextChars > GPU_PROFILE_TEXT_PAGE_CHARS)) {
+            flush(index);
+            currentFrom = index + 1;
+        }
+        current.push(line);
+        currentChars += line.length + (current.length > 1 ? 1 : 0);
+    }
+    flush(lines.length);
+    const totalPages = Math.max(chunks.length, 1);
+    const page = Math.min(Math.max(requestedPage || 1, 1), totalPages);
+    const selected = chunks[page - 1] || { from: 0, to: 0, text: '' };
+    return {
+        items: [],
+        page,
+        totalItems: lines.length,
+        totalPages,
+        from: selected.from,
+        to: selected.to,
+        text: selected.text,
+    };
+}
+
+function cleanNCUText(value: any) {
+    if (typeof value !== 'string') return value || '';
+    return value
+        .replace(/@section:[^:]+:([^@]+)@/g, '$1')
+        .replace(/@url:([^:]+):[^@]+@/g, '$1')
+        .replace(/@metric:[^:]+:([^@]+)@/g, '$1');
+}
+
+function compactProfileRule(rule: any) {
+    const message = rule?.rule_message || {};
+    const speedup = rule?.speedup_estimation?.speedup;
+    return {
+        name: message.title || rule?.name || 'Recommendation',
+        category: message.title && rule?.name && message.title !== rule.name ? rule.name : '',
+        message: cleanNCUText(message.message),
+        estimatedSpeedup: typeof speedup === 'number' ? speedup : null,
+        focusMetrics: profileArray(rule?.focus_metrics).map((metric) => ({
+            name: metric?.name || '',
+            value: metric?.value,
+            info: cleanNCUText(metric?.info),
+        })),
+    };
+}
+
+function compactProfileAction(action: any, position: number) {
+    return {
+        position,
+        name: action?.name || `Kernel ${position}`,
+        device: action?.device,
+        grid: profileArray(action?.grid),
+        block: profileArray(action?.block),
+        achievedOccupancyPct: action?.achievedOccupancyPct,
+        theoreticalOccupancyPct: action?.theoreticalOccupancyPct,
+        metricCount: Number(action?.metricCount) || profileArray(action?.metrics).length,
+        ruleCount: profileArray(action?.rules).length,
+        sourceFileCount: profileArray(action?.sourceFiles).length,
+        sourceMarkerCount: profileArray(action?.sourceMarkers).length,
+    };
+}
+
+function profileSourceLabel(path: string, position: number) {
+    if (!path) return `Source ${position}`;
+    if (path.startsWith('/work/')) return path.slice('/work/'.length);
+    const includeAt = path.lastIndexOf('/include/');
+    if (includeAt >= 0) return `CUDA include/${path.slice(includeAt + '/include/'.length)}`;
+    return path.split('/').filter(Boolean).slice(-2).join('/');
+}
 
 export class RecordListHandler extends ContestDetailBaseHandler {
     @param('page', Types.PositiveInt, true)
@@ -176,7 +304,8 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             canViewDetail = canView;
             this.args.tid = this.tdoc.docId;
             if (!this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
-                this.rdoc = contest.applyProjection(this.tdoc, this.rdoc, this.user);
+                rdoc = contest.applyProjection(this.tdoc, rdoc, this.user);
+                this.rdoc = rdoc;
             }
         }
 
@@ -249,6 +378,269 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             await postJudge(latest);
         }
         this.back();
+    }
+}
+
+export class RecordGPUProfileHandler extends RecordDetailHandler {
+    @param('rid', Types.ObjectId)
+    @param('caseId', Types.PositiveInt)
+    @param('download', Types.Boolean)
+    @param('rev', Types.ObjectId, true)
+    @param('view', Types.Range(GPU_PROFILE_VIEWS), true)
+    @param('action', Types.PositiveInt, true)
+    @param('section', Types.PositiveInt, true)
+    @param('metric', Types.PositiveInt, true)
+    @param('file', Types.PositiveInt, true)
+    @param('page', Types.PositiveInt, true)
+    async get(domainId: string, rid: ObjectId, ...args: any[]) {
+        const [
+            caseId, download = false, rev, view = 'overview', actionPosition = 1,
+            sectionPosition = 1, metricPosition = 1, filePosition = 1, requestedPage = 1,
+        ] = args as [number, boolean?, ObjectId?, GPUProfileView?, number?, number?, number?, number?, number?];
+        await super.get(domainId, rid, false, rev);
+        const detail = this.response.body as {
+            rdoc: RecordDoc;
+            [key: string]: any;
+        };
+        const profile = detail.rdoc.gpuProfiles?.[caseId];
+        if (!profile) throw new NotFoundError(`GPU profile for testcase ${caseId} not found`);
+
+        const profileUrl = (query: Record<string, any> = {}) => this.url('record_gpu_profile', {
+            rid,
+            caseId,
+            query: { ...(rev ? { rev } : {}), ...query },
+        });
+
+        if (download) {
+            if (profile.status !== 'ready' || !profile.reportPath) {
+                throw new NotFoundError(`GPU profile report for testcase ${caseId} is not ready`);
+            }
+            this.response.redirect = await storage.signDownloadLink(
+                profile.reportPath,
+                `hydro-${rid.toHexString()}-case-${caseId}.ncu-rep`,
+                false,
+                'user',
+            );
+            return;
+        }
+
+        let summary = null;
+        let summaryError = '';
+        if (profile.status === 'ready') {
+            try {
+                if (!profile.summaryPath) throw new Error('Profile summary artifact is missing.');
+                summary = JSON.parse((await streamToBuffer(await storage.get(profile.summaryPath))).toString('utf8'));
+            } catch (error) {
+                summaryError = error.message || 'Unable to load the profile summary.';
+            }
+        }
+
+        const pagination = (result: ReturnType<typeof profilePage>, urlForPage: (page: number) => string) => {
+            const pageNumbers = [1, result.page - 2, result.page - 1, result.page,
+                result.page + 1, result.page + 2, result.totalPages]
+                .filter((item, index, values) => item >= 1 && item <= result.totalPages && values.indexOf(item) === index)
+                .sort((left, right) => left - right);
+            return {
+                page: result.page,
+                totalItems: result.totalItems,
+                totalPages: result.totalPages,
+                from: result.from,
+                to: result.to,
+                previousUrl: result.page > 1 ? urlForPage(result.page - 1) : '',
+                nextUrl: result.page < result.totalPages ? urlForPage(result.page + 1) : '',
+                pages: pageNumbers.map((page) => ({ page, url: urlForPage(page) })),
+            };
+        };
+
+        let profileSummary = null;
+        let viewData = null;
+        let actionNavigation = [];
+        const summaryWarnings = [];
+        if (summary) {
+            const rawActions = profileArray(summary.ranges)
+                .flatMap((reportRange) => profileArray(reportRange?.actions));
+            const rawSections = profileArray(summary.detailSections)
+                .filter((section) => profileArray(section?.items).length);
+            const compactActions = rawActions.map((action, index) => compactProfileAction(action, index + 1));
+            actionNavigation = compactActions.map((action) => ({
+                ...action,
+                rulesUrl: action.ruleCount ? profileUrl({ view: 'rules', action: action.position }) : '',
+                metricsUrl: profileUrl({ view: 'metrics', action: action.position }),
+                sourceUrl: action.sourceFileCount || action.sourceMarkerCount
+                    ? profileUrl({ view: 'source', action: action.position }) : '',
+            }));
+            summaryWarnings.push(...profileArray(summary.warnings).filter((warning) => typeof warning === 'string'));
+
+            profileSummary = {
+                ncuVersion: summary.ncuVersion || profile.ncuVersion,
+                set: summary.set || profile.set,
+                actions: actionNavigation,
+                sections: rawSections.map((section, index) => ({
+                    position: index + 1,
+                    name: section?.sectionName || 'Other',
+                    kernelName: section?.kernelName || '',
+                    itemCount: profileArray(section?.items).length,
+                    ruleCount: profileArray(section?.rules).length,
+                    url: profileUrl({ view: 'section', section: index + 1 }),
+                })),
+                codeUrl: summary.sourceOutput ? profileUrl({ view: 'code' }) : '',
+            };
+
+            const selectedRawAction = rawActions[actionPosition - 1];
+            const selectedAction = compactActions[actionPosition - 1];
+            if (view === 'section') {
+                const selectedSection = rawSections[sectionPosition - 1];
+                if (!selectedSection) throw new NotFoundError(`GPU profile section ${sectionPosition} not found`);
+                const sectionPage = profilePage(
+                    profileArray(selectedSection.items), requestedPage, GPU_PROFILE_PAGE_SIZE.section,
+                );
+                viewData = {
+                    position: sectionPosition,
+                    totalSections: rawSections.length,
+                    name: selectedSection.sectionName || 'Other',
+                    kernelName: selectedSection.kernelName || '',
+                    items: sectionPage.items.map((item) => ({
+                        bodyItem: item?.bodyItem || '',
+                        label: item?.label || item?.name || '',
+                        name: item?.name || '',
+                        value: item?.value,
+                        unit: item?.unit || '',
+                    })),
+                    rules: profileArray(selectedSection.rules).map((rule) => ({
+                        name: rule?.name || 'Recommendation',
+                        description: cleanNCUText(rule?.description),
+                        estimatedSpeedup: rule?.estimatedSpeedup || '',
+                    })),
+                    previousSectionUrl: sectionPosition > 1
+                        ? profileUrl({ view: 'section', section: sectionPosition - 1 }) : '',
+                    nextSectionUrl: sectionPosition < rawSections.length
+                        ? profileUrl({ view: 'section', section: sectionPosition + 1 }) : '',
+                    pagination: pagination(sectionPage, (page) => profileUrl({
+                        view: 'section', section: sectionPosition, page,
+                    })),
+                };
+            } else if (view === 'rules') {
+                if (!selectedRawAction) throw new NotFoundError(`GPU profile kernel ${actionPosition} not found`);
+                viewData = {
+                    action: selectedAction,
+                    rules: profileArray(selectedRawAction.rules).map(compactProfileRule),
+                };
+            } else if (view === 'metrics') {
+                if (!selectedRawAction) throw new NotFoundError(`GPU profile kernel ${actionPosition} not found`);
+                const metricsPage = profilePage(
+                    profileArray(selectedRawAction.metrics), requestedPage, GPU_PROFILE_PAGE_SIZE.metrics,
+                );
+                viewData = {
+                    action: selectedAction,
+                    metrics: metricsPage.items.map((metric, index) => {
+                        const position = metricsPage.from + index;
+                        const storedInstances = profileArray(metric?.instances).length;
+                        return {
+                            position,
+                            name: metric?.name || '',
+                            value: metric?.value,
+                            unit: metric?.unit || '',
+                            description: metric?.description || '',
+                            instanceCount: Number(metric?.instanceCount) || 0,
+                            storedInstances,
+                            instancesTruncated: !!metric?.instancesTruncated,
+                            detailUrl: storedInstances ? profileUrl({
+                                view: 'metric', action: actionPosition, metric: position,
+                            }) : '',
+                        };
+                    }),
+                    pagination: pagination(metricsPage, (page) => profileUrl({
+                        view: 'metrics', action: actionPosition, page,
+                    })),
+                };
+            } else if (view === 'metric') {
+                if (!selectedRawAction) throw new NotFoundError(`GPU profile kernel ${actionPosition} not found`);
+                const selectedMetric = profileArray(selectedRawAction.metrics)[metricPosition - 1];
+                if (!selectedMetric) throw new NotFoundError(`GPU profile metric ${metricPosition} not found`);
+                const instancesPage = profilePage(
+                    profileArray(selectedMetric.instances), requestedPage, GPU_PROFILE_PAGE_SIZE.instances,
+                );
+                viewData = {
+                    action: selectedAction,
+                    metric: {
+                        position: metricPosition,
+                        name: selectedMetric.name || '',
+                        value: selectedMetric.value,
+                        unit: selectedMetric.unit || '',
+                        description: selectedMetric.description || '',
+                        instanceCount: Number(selectedMetric.instanceCount) || 0,
+                        storedInstanceCount: profileArray(selectedMetric.instances).length,
+                        instancesTruncated: !!selectedMetric.instancesTruncated,
+                        instances: instancesPage.items.map((instance, index) => ({
+                            index: instance?.index ?? instancesPage.from + index - 1,
+                            value: instance?.value,
+                        })),
+                    },
+                    metricsUrl: profileUrl({ view: 'metrics', action: actionPosition }),
+                    pagination: pagination(instancesPage, (page) => profileUrl({
+                        view: 'metric', action: actionPosition, metric: metricPosition, page,
+                    })),
+                };
+            } else if (view === 'source') {
+                if (!selectedRawAction) throw new NotFoundError(`GPU profile kernel ${actionPosition} not found`);
+                const sourceFiles = profileArray(selectedRawAction.sourceFiles);
+                const selectedFile = sourceFiles[filePosition - 1];
+                if (sourceFiles.length && !selectedFile) throw new NotFoundError(`GPU profile source file ${filePosition} not found`);
+                const sourcePage = profileTextPage(selectedFile?.content || '', requestedPage);
+                viewData = {
+                    action: selectedAction,
+                    files: sourceFiles.map((file, index) => ({
+                        position: index + 1,
+                        label: profileSourceLabel(file?.path || '', index + 1),
+                        url: profileUrl({ view: 'source', action: actionPosition, file: index + 1 }),
+                    })),
+                    file: selectedFile ? {
+                        position: filePosition,
+                        label: profileSourceLabel(selectedFile.path || '', filePosition),
+                        text: sourcePage.text,
+                    } : null,
+                    markers: profileArray(selectedRawAction.sourceMarkers).map((marker) => {
+                        const location = marker?.source_location;
+                        const fileLabel = location?.file_name ? profileSourceLabel(location.file_name, 1) : '';
+                        return {
+                            location: fileLabel && location?.line ? `${fileLabel}:${location.line}` : fileLabel,
+                            message: cleanNCUText(marker?.message),
+                        };
+                    }).filter((marker) => marker.message || marker.location),
+                    pagination: pagination(sourcePage, (page) => profileUrl({
+                        view: 'source', action: actionPosition, file: filePosition, page,
+                    })),
+                };
+            } else if (view === 'code') {
+                if (!summary.sourceOutput) throw new NotFoundError('CUDA, PTX and SASS output not found');
+                const codePage = profileTextPage(summary.sourceOutput, requestedPage);
+                viewData = {
+                    text: codePage.text,
+                    pagination: pagination(codePage, (page) => profileUrl({ view: 'code', page })),
+                };
+            }
+        }
+        this.response.template = 'gpu_profile.html';
+        this.response.body = {
+            ...detail,
+            caseId,
+            profile,
+            profileSummary,
+            view,
+            viewData,
+            actionNavigation,
+            warnings: uniqBy([
+                ...profileArray(profile.warnings),
+                ...summaryWarnings,
+            ].filter((warning) => typeof warning === 'string'), (warning) => warning),
+            urls: {
+                overview: profileUrl(),
+                record: this.url('record_detail', { rid, query: rev ? { rev } : {} }),
+                download: profile.status === 'ready' && profile.reportPath ? profileUrl({ download: true }) : '',
+            },
+            summaryError,
+            rev,
+        };
     }
 }
 
@@ -464,6 +856,7 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
 export async function apply(ctx) {
     ctx.Route('record_main', '/record', RecordListHandler);
     ctx.Route('record_detail', '/record/:rid', RecordDetailHandler);
+    ctx.Route('record_gpu_profile', '/record/:rid/gpu-profile/:caseId', RecordGPUProfileHandler);
     ctx.Connection('record_conn', '/record-conn', RecordMainConnectionHandler);
     ctx.Connection('record_detail_conn', '/record-detail-conn', RecordDetailConnectionHandler);
 }

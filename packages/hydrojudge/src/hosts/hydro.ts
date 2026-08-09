@@ -3,7 +3,7 @@ import { SpanStatusCode } from '@opentelemetry/api';
 import PQueue from 'p-queue';
 import superagent from 'superagent';
 import WebSocket from 'ws';
-import type { LangConfig } from '@hydrooj/common';
+import type { GPUProfileState, LangConfig } from '@hydrooj/common';
 import { fs, pipeRequest } from '@hydrooj/utils';
 import * as sysinfo from '@hydrooj/utils/lib/sysinfo';
 import type { JudgeResultBody } from 'hydrooj';
@@ -97,6 +97,33 @@ export default class Hydro implements Session {
             }
             await new Promise((resolve) => { setTimeout(resolve, 1000); });
             await this.postFile(target, filename, file, retry - 1);
+        }
+    }
+
+    async postGPUProfile(
+        target: string,
+        caseId: number,
+        profile: GPUProfileState,
+        reportFile?: string,
+        summaryFile?: string,
+        retry = 3,
+    ) {
+        try {
+            const request = this.post('judge/gpu-profile')
+                .field('rid', target)
+                .field('caseId', caseId.toString())
+                .field('profile', JSON.stringify(profile));
+            if (reportFile) request.attach('report', await fs.readFile(reportFile), { filename: `case-${caseId}.ncu-rep` });
+            if (summaryFile) request.attach('summary', await fs.readFile(summaryFile), { filename: `case-${caseId}.summary.json` });
+            const response = await request;
+            if (!response.body?.ok) throw new Error('GPU profile is no longer pending on this record.');
+        } catch (e) {
+            if (!retry) {
+                log.error('PostGPUProfile Fail: %s/%s %o', target, caseId, e);
+                throw e;
+            }
+            await new Promise((resolve) => { setTimeout(resolve, 1000); });
+            await this.postGPUProfile(target, caseId, profile, reportFile, summaryFile, retry - 1);
         }
     }
 

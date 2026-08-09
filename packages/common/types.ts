@@ -103,6 +103,38 @@ export interface JudgeMeta {
     type?: string;
 }
 
+export interface GPUProfileTiming {
+    kernelTimeMs: number;
+    baselineTimeMs: number;
+    speedup: number;
+    theoreticalLowerBoundMs: number;
+    rooflineEfficiency: number;
+    bandwidthGBps: number;
+    performanceScore: number;
+    warmup: number;
+    repeats: number;
+    memoryBytes: number;
+}
+
+export interface GPUProfileState {
+    id: string;
+    status: 'pending' | 'ready' | 'error';
+    language: 'cuda' | 'tilelang';
+    hardware: string;
+    computeCapability: string;
+    set: string;
+    measureRun: number;
+    nvtxRange: string;
+    timing?: GPUProfileTiming;
+    reportPath?: string;
+    summaryPath?: string;
+    ncuVersion?: string;
+    createdAt: string;
+    completedAt?: string;
+    warnings?: string[];
+    error?: string;
+}
+
 export interface RecordJudgeInfo {
     score: number;
     memory: number;
@@ -115,6 +147,7 @@ export interface RecordJudgeInfo {
     judgeAt: Date;
     status: number;
     subtasks?: Record<number, SubtaskResult>;
+    gpuProfiles?: Record<string, GPUProfileState>;
 }
 
 export interface RecordPayload extends RecordJudgeInfo {
@@ -190,4 +223,5 @@ export interface JudgeResultBody {
     compilerText?: string;
     nop?: boolean;
     subtasks?: Record<number, SubtaskResult>;
+    gpuProfiles?: Record<string, GPUProfileState>;
 }

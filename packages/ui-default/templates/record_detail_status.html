@@ -22,6 +22,7 @@
   </div>
 {% endif %}
 {% if rdoc.testCases.length %}
+  {% set hasGPUProfiles = rdoc.gpuProfiles and Object.keys(rdoc.gpuProfiles).length %}
   <div class="section__body no-padding">
     <table class="data-table record_detail__table">
       <colgroup>
@@ -29,6 +30,7 @@
         <col class="col--status">
         <col class="col--time">
         <col class="col--memory">
+        {% if hasGPUProfiles %}<col class="col--profile">{% endif %}
       </colgroup>
       <thead>
         <tr>
@@ -41,6 +43,7 @@
           </th>
           <th class="col--time">{{ _('Time Cost') }}</th>
           <th class="col--memory">{{ _('Memory Cost') }}</th>
+          {% if hasGPUProfiles %}<th class="col--profile">{{ _('GPU Profile') }}</th>{% endif %}
         </tr>
       </thead>
       <tbody>
@@ -61,6 +64,7 @@
           </td>
           <td class="col--time"></td>
           <td class="col--memory"></td>
+          {% if hasGPUProfiles %}<td class="col--profile"></td>{% endif %}
           {% endif %}
         </tr>
         {% endif %}
@@ -83,6 +87,17 @@
             </td>
             <td class="col--time">{% if rcdoc['status'] == STATUS.STATUS_TIME_LIMIT_EXCEEDED or rcdoc['status'] == STATUS.STATUS_MEMORY_LIMIT_EXCEEDED or rcdoc['status'] == STATUS.STATUS_OUTPUT_LIMIT_EXCEEDED %}&ge;{% endif %}{{ rcdoc.time|round|int }}ms</td>
             <td class="col--memory">{% if rcdoc['status'] == STATUS.STATUS_TIME_LIMIT_EXCEEDED or rcdoc['status'] == STATUS.STATUS_MEMORY_LIMIT_EXCEEDED or rcdoc['status'] == STATUS.STATUS_OUTPUT_LIMIT_EXCEEDED %}&ge;{% endif %}{{ size(rcdoc.memory, 1024) }}</td>
+            {% if hasGPUProfiles %}
+            <td class="col--profile">
+              {% set gpuProfile = rdoc.gpuProfiles[rcdoc.id] %}
+              {% if gpuProfile %}
+              <a href="{{ url('record_gpu_profile', rid=rdoc._id, caseId=rcdoc.id, query={rev:rev} if rev else {}) }}">
+                <span class="icon {{ 'icon-info' if gpuProfile.status == 'ready' else ('icon-close' if gpuProfile.status == 'error' else 'icon-schedule') }}"></span>
+                {{ _('Profile ready') if gpuProfile.status == 'ready' else (_('Profile failed') if gpuProfile.status == 'error' else _('Profile pending')) }}
+              </a>
+              {% endif %}
+            </td>
+            {% endif %}
           </tr>
         {%- endfor -%}
       {%- endfor -%}

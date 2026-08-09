@@ -279,6 +279,7 @@ const acm = buildContestRule({
         delete rdoc.memory;
         rdoc.testCases = [];
         rdoc.judgeTexts = [];
+        delete rdoc.gpuProfiles;
         delete rdoc.progress;
         delete rdoc.subtasks;
         delete rdoc.score;
@@ -460,6 +461,7 @@ const oi = buildContestRule({
         delete rdoc.time;
         delete rdoc.score;
         rdoc.testCases = [];
+        delete rdoc.gpuProfiles;
         delete rdoc.subtasks;
         return rdoc;
     },

@@ -1,0 +1,250 @@
+{% extends "layout/basic.html" %}
+{% macro value(data) %}{% if data == null or data == '' %}-{% elif typeof(data) == 'object' %}{{ data|json }}{% else %}{{ data }}{% endif %}{% endmacro %}
+{% macro pager(data) %}
+{% if data and data.totalPages > 1 %}
+<div class="gpu-profile__pager">
+  <nav class="pager" aria-label="{{ _('Pagination') }}">
+    <a class="pager__item previous link{% if not data.previousUrl %} disabled{% endif %}" href="{{ data.previousUrl|default('#') }}" title="{{ _('pager_previous') }}">
+      <span class="icon icon-chevron_left"></span>
+    </a>
+    {% for item in data.pages %}
+      {% if loop.index0 > 0 and item.page - data.pages[loop.index0 - 1].page > 1 %}<span class="pager__item ellipsis">...</span>{% endif %}
+      {% if item.page == data.page %}<span class="pager__item current">{{ item.page }}</span>{% else %}<a class="pager__item page link" href="{{ item.url }}">{{ item.page }}</a>{% endif %}
+    {% endfor %}
+    <a class="pager__item next link{% if not data.nextUrl %} disabled{% endif %}" href="{{ data.nextUrl|default('#') }}" title="{{ _('pager_next') }}">
+      <span class="icon icon-chevron_right"></span>
+    </a>
+  </nav>
+</div>
+{% endif %}
+{% endmacro %}
+{% macro action_tabs(action, navigation, currentView) %}
+<div class="gpu-profile__kernel-bar">
+  <div class="gpu-profile__kernel-name"><span class="icon icon-code"></span><strong>{{ action.name }}</strong></div>
+  <nav class="gpu-profile__tabs">
+    {% for item in navigation %}{% if item.position == action.position %}
+      {% if item.rulesUrl %}<a class="gpu-profile__tab{% if currentView == 'rules' %} is-active{% endif %}" href="{{ item.rulesUrl }}">{{ _('Recommendations') }} <span class="gpu-profile__count">{{ item.ruleCount }}</span></a>{% endif %}
+      <a class="gpu-profile__tab{% if currentView == 'metrics' or currentView == 'metric' %} is-active{% endif %}" href="{{ item.metricsUrl }}">{{ _('Raw metrics') }} <span class="gpu-profile__count">{{ item.metricCount }}</span></a>
+      {% if item.sourceUrl %}<a class="gpu-profile__tab{% if currentView == 'source' %} is-active{% endif %}" href="{{ item.sourceUrl }}">{{ _('Source') }}</a>{% endif %}
+    {% endif %}{% endfor %}
+  </nav>
+</div>
+{% endmacro %}
+{% block content %}
+<div class="row">
+  <div class="columns">
+    <div class="section">
+      <div class="section__header">
+        <h1 class="section__title">{{ _('GPU Profile') }} #{{ caseId }}</h1>
+        <div class="section__tools">
+          <a class="rounded button" href="{{ urls.record }}"><span class="icon icon-chevron_left"></span> {{ _('Record') }}</a>
+          {% if view != 'overview' %}<a class="rounded button" href="{{ urls.overview }}">{{ _('Overview') }}</a>{% endif %}
+          {% if urls.download %}<a class="primary rounded button" href="{{ urls.download }}"><span class="icon icon-download"></span> {{ _('Download .ncu-rep') }}</a>{% endif %}
+        </div>
+      </div>
+      {% if view == 'overview' or profile.status != 'ready' %}
+      <div class="section__body typo">
+        <div class="gpu-profile__status gpu-profile__status--{{ profile.status }}">
+          <span class="icon {{ 'icon-check' if profile.status == 'ready' else ('icon-close' if profile.status == 'error' else 'icon-schedule') }}"></span>
+          <strong>{{ _('Profile ready') if profile.status == 'ready' else (_('Profile failed') if profile.status == 'error' else _('Profile pending')) }}</strong>
+        </div>
+        {% if profile.status == 'pending' %}<p>{{ _('Nsight Compute is collecting the report for this testcase.') }}</p>{% endif %}
+        {% if profile.status == 'error' %}<pre class="gpu-profile__output">{{ profile.error }}</pre>{% endif %}
+        <dl class="gpu-profile__facts">
+          <div><dt>{{ _('Language') }}</dt><dd>{{ profile.language }}</dd></div>
+          <div><dt>{{ _('GPU') }}</dt><dd>{{ profile.hardware }}</dd></div>
+          <div><dt>{{ _('Compute capability') }}</dt><dd>{{ profile.computeCapability }}</dd></div>
+          <div><dt>{{ _('NCU version') }}</dt><dd>{{ profileSummary.ncuVersion|default(profile.ncuVersion)|default('-') }}</dd></div>
+          <div><dt>{{ _('Collection') }}</dt><dd>{{ profileSummary.set|default(profile.set) }}</dd></div>
+          <div><dt>{{ _('Profiled invocation') }}</dt><dd>#{{ profile.measureRun }}</dd></div>
+        </dl>
+      </div>
+      {% endif %}
+    </div>
+
+    {% if profile.timing and view == 'overview' %}
+    <div class="section">
+      <div class="section__header"><h1 class="section__title">{{ _('Hydro Clean Timing') }}</h1></div>
+      <div class="section__body no-padding gpu-profile__table-wrap">
+        <table class="data-table gpu-profile__timing">
+          <thead><tr><th>{{ _('Kernel') }}</th><th>{{ _('PyTorch baseline') }}</th><th>{{ _('Speedup') }}</th><th>{{ _('Roofline lower bound') }}</th><th>{{ _('Efficiency') }}</th><th>{{ _('Bandwidth') }}</th><th>{{ _('Score') }}</th></tr></thead>
+          <tbody><tr>
+            <td>{{ profile.timing.kernelTimeMs|round(6) }} ms</td><td>{{ profile.timing.baselineTimeMs|round(6) }} ms</td>
+            <td>{{ profile.timing.speedup|round(4) }}x</td><td>{{ profile.timing.theoreticalLowerBoundMs|round(6) }} ms</td>
+            <td>{{ profile.timing.rooflineEfficiency|round(2) }}%</td><td>{{ profile.timing.bandwidthGBps|round(2) }} GB/s</td>
+            <td>{{ profile.timing.performanceScore|round(2) }}</td>
+          </tr></tbody>
+        </table>
+      </div>
+      <div class="section__body gpu-profile__timing-note">
+        <span>{{ _('Warmup') }} <strong>{{ profile.timing.warmup }}</strong></span>
+        <span>{{ _('Repeats') }} <strong>{{ profile.timing.repeats }}</strong></span>
+        <span>{{ _('Working memory') }} <strong>{{ size(profile.timing.memoryBytes) }}</strong></span>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if summaryError %}
+    <div class="section">
+      <div class="section__header"><h1 class="section__title">{{ _('Summary Error') }}</h1></div>
+      <div class="section__body"><pre class="gpu-profile__output">{{ summaryError }}</pre></div>
+    </div>
+    {% endif %}
+
+    {% if view == 'overview' and profileSummary %}
+    <div class="section">
+      <div class="section__header"><h1 class="section__title">{{ _('Profiled Kernels') }}</h1></div>
+      <div class="section__body no-padding gpu-profile__table-wrap">
+        <table class="data-table gpu-profile__kernels">
+          <thead><tr><th>{{ _('Kernel') }}</th><th>{{ _('Launch') }}</th><th>{{ _('Occupancy') }}</th><th>{{ _('Data') }}</th></tr></thead>
+          <tbody>{% for action in profileSummary.actions %}<tr>
+            <td><strong>{{ action.name }}</strong>{% if action.device %}<div class="gpu-profile__muted">{{ value(action.device) }}</div>{% endif %}</td>
+            <td><span class="gpu-profile__dimension">{{ action.grid|join(' x ') }}</span> grid<br><span class="gpu-profile__dimension">{{ action.block|join(' x ') }}</span> block</td>
+            <td>{{ value(action.achievedOccupancyPct) }}% <span class="gpu-profile__muted">{{ _('achieved') }}</span><br>{{ value(action.theoreticalOccupancyPct) }}% <span class="gpu-profile__muted">{{ _('theoretical') }}</span></td>
+            <td class="gpu-profile__links">
+              {% if action.rulesUrl %}<a href="{{ action.rulesUrl }}">{{ _('Recommendations') }} ({{ action.ruleCount }})</a>{% endif %}
+              <a href="{{ action.metricsUrl }}">{{ _('Raw metrics') }} ({{ action.metricCount }})</a>
+              {% if action.sourceUrl %}<a href="{{ action.sourceUrl }}">{{ _('Source correlation') }}</a>{% endif %}
+            </td>
+          </tr>{% endfor %}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section__header">
+        <h1 class="section__title">{{ _('Nsight Compute Sections') }} <span class="gpu-profile__heading-count">{{ profileSummary.sections.length }}</span></h1>
+        {% if profileSummary.codeUrl %}<div class="section__tools"><a class="rounded button" href="{{ profileSummary.codeUrl }}">{{ _('CUDA, PTX and SASS') }}</a></div>{% endif %}
+      </div>
+      <div class="section__body no-padding gpu-profile__table-wrap">
+        <table class="data-table gpu-profile__sections">
+          <thead><tr><th>{{ _('Section') }}</th><th>{{ _('Metrics') }}</th><th>{{ _('Recommendations') }}</th></tr></thead>
+          <tbody>{% for item in profileSummary.sections %}<tr>
+            <td><a href="{{ item.url }}"><strong>{{ item.name }}</strong></a></td>
+            <td>{{ item.itemCount }}</td><td>{{ item.ruleCount }}</td>
+          </tr>{% endfor %}</tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if warnings.length and view == 'overview' %}
+    <div class="section">
+      <div class="section__header"><h1 class="section__title">{{ _('Warnings') }}</h1></div>
+      <div class="section__body typo"><ul>{% for warning in warnings %}<li>{{ warning }}</li>{% endfor %}</ul></div>
+    </div>
+    {% endif %}
+
+    {% if viewData and (view == 'rules' or view == 'metrics' or view == 'metric' or view == 'source') %}
+      {{ action_tabs(viewData.action, actionNavigation, view) }}
+    {% endif %}
+
+    {% if view == 'section' and viewData %}
+    <div class="section">
+      <div class="section__header">
+        <h1 class="section__title">{{ viewData.name }}</h1>
+        <div class="section__tools gpu-profile__section-switcher">
+          {% if viewData.previousSectionUrl %}<a class="rounded button" href="{{ viewData.previousSectionUrl }}" title="{{ _('Previous section') }}"><span class="icon icon-chevron_left"></span></a>{% endif %}
+          <span>{{ viewData.position }} / {{ viewData.totalSections }}</span>
+          {% if viewData.nextSectionUrl %}<a class="rounded button" href="{{ viewData.nextSectionUrl }}" title="{{ _('Next section') }}"><span class="icon icon-chevron_right"></span></a>{% endif %}
+        </div>
+      </div>
+      {% if viewData.kernelName %}<div class="section__body gpu-profile__kernel-context">{{ viewData.kernelName }}</div>{% endif %}
+      {% if viewData.rules.length %}<div class="section__body typo gpu-profile__recommendations">
+        {% for rule in viewData.rules %}<div class="gpu-profile__recommendation"><strong>{{ rule.name }}</strong>{% if rule.estimatedSpeedup %}<span class="gpu-profile__estimate">{{ _('Estimated speedup') }} {{ rule.estimatedSpeedup }}%</span>{% endif %}<p>{{ rule.description }}</p></div>{% endfor %}
+      </div>{% endif %}
+      {{ pager(viewData.pagination) }}
+      {% if viewData.items.length %}<div class="section__body no-padding gpu-profile__table-wrap">
+        <table class="data-table gpu-profile__section-items">
+          <thead><tr><th>{{ _('Group') }}</th><th>{{ _('Metric') }}</th><th>{{ _('Value') }}</th><th>{{ _('Unit') }}</th></tr></thead>
+          <tbody>{% for item in viewData.items %}<tr>
+            <td>{{ item.bodyItem }}</td><td><span class="gpu-profile__metric-label"{% if item.name %} title="{{ item.name }}"{% endif %}>{{ item.label }}</span></td><td>{{ value(item.value) }}</td><td>{{ item.unit }}</td>
+          </tr>{% endfor %}</tbody>
+        </table>
+      </div>{% endif %}
+      {{ pager(viewData.pagination) }}
+    </div>
+    {% endif %}
+
+    {% if view == 'rules' and viewData %}
+    <div class="section">
+      <div class="section__header"><h1 class="section__title">{{ _('Nsight Recommendations') }} <span class="gpu-profile__heading-count">{{ viewData.rules.length }}</span></h1></div>
+      <div class="section__body typo gpu-profile__rules">
+        {% if not viewData.rules.length %}<p>{{ _('No recommendations were reported for this kernel.') }}</p>{% endif %}
+        {% for rule in viewData.rules %}<article class="gpu-profile__rule">
+          <h2>{{ rule.name }}{% if rule.category %}<small>{{ rule.category }}</small>{% endif %}</h2>
+          {% if rule.message %}<p>{{ rule.message }}</p>{% endif %}
+          {% if rule.estimatedSpeedup != null %}<p class="gpu-profile__estimate">{{ _('Estimated speedup') }} <strong>{{ rule.estimatedSpeedup|round(2) }}%</strong></p>{% endif %}
+          {% if rule.focusMetrics.length %}<div class="gpu-profile__table-wrap"><table class="data-table gpu-profile__focus-metrics">
+            <thead><tr><th>{{ _('Focus metric') }}</th><th>{{ _('Value') }}</th><th>{{ _('Recommendation') }}</th></tr></thead>
+            <tbody>{% for metric in rule.focusMetrics %}<tr><td><code>{{ metric.name }}</code></td><td>{{ value(metric.value) }}</td><td>{{ metric.info }}</td></tr>{% endfor %}</tbody>
+          </table></div>{% endif %}
+        </article>{% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if view == 'metrics' and viewData %}
+    <div class="section">
+      <div class="section__header"><h1 class="section__title">{{ _('Raw Metrics') }}</h1></div>
+      {{ pager(viewData.pagination) }}
+      <div class="section__body no-padding gpu-profile__table-wrap">
+        <table class="data-table gpu-profile__metrics">
+          <thead><tr><th>{{ _('Metric') }}</th><th>{{ _('Value') }}</th><th>{{ _('Unit') }}</th><th>{{ _('Instances') }}</th></tr></thead>
+          <tbody>{% for metric in viewData.metrics %}<tr>
+            <td><code>{{ metric.name }}</code>{% if metric.description %}<div class="gpu-profile__description">{{ metric.description }}</div>{% endif %}</td>
+            <td>{{ value(metric.value) }}</td><td>{{ metric.unit }}</td>
+            <td>{% if metric.detailUrl %}<a href="{{ metric.detailUrl }}">{{ metric.storedInstances }} / {{ metric.instanceCount }}</a>{% else %}{{ metric.instanceCount }}{% endif %}{% if metric.instancesTruncated %}<span class="gpu-profile__muted"> {{ _('stored') }}</span>{% endif %}</td>
+          </tr>{% endfor %}</tbody>
+        </table>
+      </div>
+      {{ pager(viewData.pagination) }}
+    </div>
+    {% endif %}
+
+    {% if view == 'metric' and viewData %}
+    <div class="section">
+      <div class="section__header"><h1 class="section__title"><code>{{ viewData.metric.name }}</code></h1><div class="section__tools"><a class="rounded button" href="{{ viewData.metricsUrl }}"><span class="icon icon-chevron_left"></span> {{ _('Raw metrics') }}</a></div></div>
+      <div class="section__body typo">
+        {% if viewData.metric.description %}<p>{{ viewData.metric.description }}</p>{% endif %}
+        <dl class="gpu-profile__facts gpu-profile__facts--compact">
+          <div><dt>{{ _('Value') }}</dt><dd>{{ value(viewData.metric.value) }} {{ viewData.metric.unit }}</dd></div>
+          <div><dt>{{ _('Stored instances') }}</dt><dd>{{ viewData.metric.storedInstanceCount }} / {{ viewData.metric.instanceCount }}</dd></div>
+        </dl>
+      </div>
+      {{ pager(viewData.pagination) }}
+      {% if viewData.metric.instances.length %}<div class="section__body no-padding gpu-profile__table-wrap"><table class="data-table gpu-profile__instances">
+        <thead><tr><th>#</th><th>{{ _('Value') }}</th></tr></thead>
+        <tbody>{% for instance in viewData.metric.instances %}<tr><td>{{ instance.index }}</td><td>{{ value(instance.value) }}</td></tr>{% endfor %}</tbody>
+      </table></div>{% endif %}
+      {{ pager(viewData.pagination) }}
+    </div>
+    {% endif %}
+
+    {% if view == 'source' and viewData %}
+    <div class="section">
+      <div class="section__header"><h1 class="section__title">{{ _('Source Correlation') }}</h1></div>
+      {% if viewData.markers.length %}<div class="section__body gpu-profile__markers">
+        {% for marker in viewData.markers %}<div class="gpu-profile__marker">{% if marker.location %}<code>{{ marker.location }}</code>{% endif %}<span>{{ marker.message }}</span></div>{% endfor %}
+      </div>{% endif %}
+      {% if viewData.file %}
+        <nav class="gpu-profile__file-tabs">{% for file in viewData.files %}<a class="gpu-profile__file-tab{% if file.position == viewData.file.position %} is-active{% endif %}" href="{{ file.url }}">{{ file.label }}</a>{% endfor %}</nav>
+        {{ pager(viewData.pagination) }}
+        <div class="section__body no-padding"><pre class="gpu-profile__source">{{ viewData.file.text }}</pre></div>
+        {{ pager(viewData.pagination) }}
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if view == 'code' and viewData %}
+    <div class="section">
+      <div class="section__header"><h1 class="section__title">{{ _('CUDA, PTX and SASS') }}</h1></div>
+      {{ pager(viewData.pagination) }}
+      <div class="section__body no-padding"><pre class="gpu-profile__source">{{ viewData.text }}</pre></div>
+      {{ pager(viewData.pagination) }}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+{% block script %}{% if profile.status == 'pending' %}<script>setTimeout(function () { window.location.reload(); }, 5000);</script>{% endif %}{% endblock %}

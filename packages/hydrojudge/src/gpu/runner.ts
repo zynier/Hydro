@@ -2,7 +2,7 @@
 import { spawn } from 'child_process';
 import { createHash } from 'crypto';
 import path from 'path';
-import { fs } from '@hydrooj/utils';
+import { findFileSync, fs } from '@hydrooj/utils';
 import { getConfig } from '../config';
 import { GPUDevice } from './index';
 
@@ -43,7 +43,30 @@ export interface GPUContainerResult {
     results: GPUBenchmarkResult[];
 }
 
-function runnerSource(entry: string, cases: NormalizedGPUCase[], language: GPULanguage) {
+export interface GPUProfileArtifactResult {
+    id: number;
+    code: number;
+    stdout: string;
+    stderr: string;
+    timedOut: boolean;
+    reportPath?: string;
+    summaryPath?: string;
+}
+
+export interface GPUWorkdirOptions {
+    profile?: boolean;
+    profileMeasureRun?: number;
+    profileNcu?: string;
+    profileSet?: string;
+    profileMaxInstances?: number;
+}
+
+function runnerSource(
+    entry: string,
+    cases: NormalizedGPUCase[],
+    language: GPULanguage,
+    profileMeasureRun = 1,
+) {
     return String.raw`#!/usr/bin/env python3
 import contextlib
 import ctypes
@@ -66,6 +89,7 @@ LANGUAGE = ${JSON.stringify(language)}
 CASE_CONFIGS = {item["id"]: item for item in ${JSON.stringify(cases)}}
 DEFAULT_WARMUP = 100
 DEFAULT_REPEATS = 2000
+PROFILE_MEASURE_RUN = ${profileMeasureRun}
 
 
 def load_testcase_config():
@@ -275,7 +299,7 @@ def normalize_workload(raw):
     return {"flops": flops, "memoryBytes": memory_bytes, "dtype": dtype}
 
 
-def run_case(module, kernel, case_id):
+def prepare_case(module, case_id):
     torch.manual_seed(case_id)
     torch.cuda.manual_seed_all(case_id)
     torch.cuda.set_device(0)
@@ -290,6 +314,11 @@ def run_case(module, kernel, case_id):
     if any(role not in ("INPUT", "OUTPUT", "INOUT") for role in input_classes):
         raise ValueError("INPUT_CLASS roles must be INPUT, OUTPUT, or INOUT")
     workload = normalize_workload(module.getWorkload(sizes))
+    return sizes, warmup, repeats, original, input_classes, workload
+
+
+def run_case(module, kernel, case_id):
+    sizes, warmup, repeats, original, input_classes, workload = prepare_case(module, case_id)
 
     invocation_pairs = prepare_interleaved_invocations(
         original,
@@ -335,8 +364,41 @@ def run_case(module, kernel, case_id):
     }
 
 
+def run_profile_case(module, kernel, case_id):
+    _, warmup, repeats, original, input_classes, _ = prepare_case(module, case_id)
+    measure_run = min(PROFILE_MEASURE_RUN, repeats)
+    invocation_pairs = prepare_interleaved_invocations(
+        original,
+        input_classes,
+        warmup + measure_run,
+        start_with_target=case_id % 2 == 1,
+    )
+
+    # Match the clean pass through warmup and the measured invocations before
+    # the selected run. Only the selected target call is inside the NVTX range.
+    torch.cuda.synchronize()
+    stream = torch.cuda.default_stream()
+    torch.cuda.set_stream(stream)
+    run_interleaved(kernel, module.baseline, invocation_pairs[:warmup + measure_run - 1])
+    torch.cuda.synchronize()
+    target_inputs, baseline_inputs, target_first = invocation_pairs[-1]
+    if not target_first:
+        module.baseline(*baseline_inputs)
+        torch.cuda.synchronize()
+
+    range_name = f"hydro-case-{case_id}"
+    torch.cuda.nvtx.range_push(range_name)
+    try:
+        kernel(*target_inputs)
+    finally:
+        torch.cuda.nvtx.range_pop()
+    torch.cuda.synchronize()
+    print(f"HYDRO_GPU_PROFILE_OK {case_id} {measure_run} {range_name}", flush=True)
+
+
 def main():
-    case_id = int(sys.argv[1])
+    profile_mode = len(sys.argv) == 3 and sys.argv[1] == "--profile"
+    case_id = int(sys.argv[2] if profile_mode else sys.argv[1])
     if case_id not in CASE_CONFIGS:
         raise ValueError(f"Unknown GPU testcase id: {case_id}")
     nonce = secrets.token_hex(32)
@@ -344,6 +406,9 @@ def main():
     module = load_testcase_config()
     torch.cuda.set_device(0)
     library, kernel = load_kernel()
+    if profile_mode:
+        run_profile_case(module, kernel, case_id)
+        return
     try:
         result = run_case(module, kernel, case_id)
     except Exception as error:
@@ -370,7 +435,7 @@ if __name__ == "__main__":
 `;
 }
 
-function compileScript(computeCapability: string, language: GPULanguage) {
+function compileScript(computeCapability: string, language: GPULanguage, profile = false) {
     if (language === 'tilelang') {
         return `#!/bin/bash
 set -eu
@@ -381,12 +446,57 @@ echo HYDRO_GPU_COMPILE_OK
     const arch = computeCapability.replace('.', '');
     return `#!/bin/bash
 set -eu
-nvcc -O3 --use_fast_math --extra-device-vectorization -std=c++17 -DNDEBUG \\
+nvcc -O3 --use_fast_math --extra-device-vectorization ${profile ? '-lineinfo ' : ''}-std=c++17 -DNDEBUG \\
   -Xptxas=-O3 -shared -Xcompiler=-O3 -Xcompiler=-fPIC \\
   -gencode=arch=compute_${arch},code=sm_${arch} \\
   -gencode=arch=compute_${arch},code=compute_${arch} \\
   -o /work/submission.so /work/submission.cu
 echo HYDRO_GPU_COMPILE_OK
+`;
+}
+
+function shellQuote(value: string) {
+    return `'${value.replace(/'/g, '\u0027\\\u0027\u0027')}'`;
+}
+
+function profileScript(ncu: string, sectionSet: string, measureRun: number, maxInstances: number) {
+    return `#!/bin/bash
+set -eu
+case_id="$1"
+ncu_cmd=${shellQuote(ncu)}
+section_set=${shellQuote(sectionSet)}
+measure_run=${measureRun}
+range_name="hydro-case-$case_id"
+profile_dir="/profile"
+report="$profile_dir/case-$case_id.ncu-rep"
+details="$profile_dir/case-$case_id.details.csv"
+session="$profile_dir/case-$case_id.session.txt"
+source="$profile_dir/case-$case_id.source.txt"
+summary="$profile_dir/case-$case_id.summary.json"
+mkdir -p "$profile_dir"
+
+"$ncu_cmd" \\
+  --set "$section_set" \\
+  --nvtx \\
+  --nvtx-include "$range_name/" \\
+  --replay-mode kernel \\
+  --target-processes application-only \\
+  --import-sass on \\
+  --import-source on \\
+  --source-folders /work,/tmp \\
+  --export "$report" \\
+  --force-overwrite \\
+  python3 -u /work/runner.py --profile "$case_id"
+
+"$ncu_cmd" --import "$report" --page details --csv --print-details all \\
+  --print-metric-name label-name --print-units base --print-fp > "$details"
+"$ncu_cmd" --import "$report" --page session > "$session"
+"$ncu_cmd" --import "$report" --page source --print-source cuda,sass > "$source" 2>&1 || true
+"$ncu_cmd" --import "$report" --page source --print-source ptx >> "$source" 2>&1 || true
+
+HYDRO_NCU="$ncu_cmd" HYDRO_PROFILE_MAX_INSTANCES=${maxInstances} \\
+  python3 /work/profile_summary.py "$report" "$details" "$session" "$source" "$summary" \\
+  "$section_set" "$measure_run" "$range_name"
 `;
 }
 
@@ -398,13 +508,34 @@ export async function prepareGPUWorkdir(
     cases: NormalizedGPUCase[],
     device: GPUDevice,
     language: GPULanguage = 'cuda',
+    options: GPUWorkdirOptions = {},
 ) {
-    await Promise.all([
+    const profileMeasureRun = options.profileMeasureRun || 1;
+    const writes: Promise<any>[] = [
         fs.writeFile(path.join(workdir, language === 'tilelang' ? 'submission.py' : 'submission.cu'), code),
         fs.copy(testcase, path.join(workdir, 'testcase_config.py')),
-        fs.writeFile(path.join(workdir, 'runner.py'), runnerSource(entry, cases, language), { mode: 0o700 }),
-        fs.writeFile(path.join(workdir, 'compile.sh'), compileScript(device.computeCapability, language), { mode: 0o700 }),
-    ]);
+        fs.writeFile(path.join(workdir, 'runner.py'), runnerSource(entry, cases, language, profileMeasureRun), { mode: 0o700 }),
+        fs.writeFile(path.join(workdir, 'compile.sh'), compileScript(device.computeCapability, language, options.profile), { mode: 0o700 }),
+    ];
+    if (options.profile) {
+        writes.push(
+            fs.copy(
+                findFileSync('@hydrooj/hydrojudge/gpu/profile_summary.py'),
+                path.join(workdir, 'profile_summary.py'),
+            ),
+            fs.writeFile(
+                path.join(workdir, 'profile.sh'),
+                profileScript(
+                    options.profileNcu || 'ncu',
+                    options.profileSet || 'full',
+                    profileMeasureRun,
+                    options.profileMaxInstances ?? 100000,
+                ),
+                { mode: 0o700 },
+            ),
+        );
+    }
+    await Promise.all(writes);
 }
 
 export function parseResults(stdout: string): GPUBenchmarkResult[] {
@@ -443,23 +574,15 @@ export function parseResults(stdout: string): GPUBenchmarkResult[] {
     return [...results.values()];
 }
 
-export async function runGPUContainer(
-    workdir: string,
-    device: GPUDevice,
-    rid: string,
-    executionTimeout: number,
-    cases: NormalizedGPUCase[],
-    language: GPULanguage = 'cuda',
-): Promise<GPUContainerResult> {
+function gpuContainerArgs(name: string, language: GPULanguage, tmpfsSize = '1g') {
     const config = getConfig('gpu');
-    const safeRid = rid.replace(/[^A-Za-z0-9_.-]/g, '').slice(-24);
-    const containerArgs = (name: string) => [
+    return [
         'run', '--rm', '--init', '--name', name,
         '--user', `${process.getuid?.() ?? 65534}:${process.getgid?.() ?? 65534}`,
         '--network', 'none',
         '--read-only',
-        // TileLang JIT loads its generated shared object from /tmp.
-        '--tmpfs', '/tmp:rw,nosuid,nodev,exec,size=1g',
+        // TileLang JIT and Nsight Compute use executable temporary files.
+        '--tmpfs', `/tmp:rw,nosuid,nodev,exec,size=${tmpfsSize}`,
         '--cap-drop', 'ALL',
         '--security-opt', 'no-new-privileges',
         '--pids-limit', config.pids_limit.toString(),
@@ -470,21 +593,24 @@ export async function runGPUContainer(
         '--env', 'PYTHONDONTWRITEBYTECODE=1',
         '--env', `HYDRO_GPU_LANGUAGE=${language}`,
     ];
+}
 
-    const runContainer = async (name: string, args: string[], timeout: number) => await new Promise<{
+async function runOCIContainer(name: string, args: string[], timeout: number) {
+    const runtime = getConfig('gpu').runtime;
+    return await new Promise<{
         code: number;
         stdout: string;
         stderr: string;
         timedOut: boolean;
     }>((resolve, reject) => {
-        const child = spawn(config.runtime, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+        const child = spawn(runtime, args, { stdio: ['ignore', 'pipe', 'pipe'] });
         let stdout = '';
         let stderr = '';
         let timedOut = false;
         const append = (current: string, chunk: Buffer) => (current + chunk.toString('utf8')).slice(-1024 * 1024);
         const stopContainer = () => {
             child.kill('SIGKILL');
-            const cleanup = spawn(config.runtime, ['kill', name], { stdio: 'ignore' });
+            const cleanup = spawn(runtime, ['kill', name], { stdio: 'ignore' });
             cleanup.unref();
         };
         const killTimer = setTimeout(() => {
@@ -502,11 +628,23 @@ export async function runGPUContainer(
             resolve({ code: code ?? -1, stdout, stderr, timedOut });
         });
     });
+}
 
-    const randomSuffix = () => Math.random().toString(36).slice(2, 8);
+const randomSuffix = () => Math.random().toString(36).slice(2, 8);
+
+export async function runGPUContainer(
+    workdir: string,
+    device: GPUDevice,
+    rid: string,
+    executionTimeout: number,
+    cases: NormalizedGPUCase[],
+    language: GPULanguage = 'cuda',
+): Promise<GPUContainerResult> {
+    const config = getConfig('gpu');
+    const safeRid = rid.replace(/[^A-Za-z0-9_.-]/g, '').slice(-24);
     const compileName = `hydro-gpu-compile-${safeRid}-${randomSuffix()}`;
-    const compile = await runContainer(compileName, [
-        ...containerArgs(compileName),
+    const compile = await runOCIContainer(compileName, [
+        ...gpuContainerArgs(compileName, language),
         '--volume', `${workdir}:/work:rw`,
         '--workdir', '/work',
         config.container_image,
@@ -536,8 +674,8 @@ export async function runGPUContainer(
             return { code, stdout, stderr, compiled, timeout: 'execute', results };
         }
         const name = `hydro-gpu-case-${test.id}-${safeRid}-${randomSuffix()}`;
-        const execution = await runContainer(name, [
-            ...containerArgs(name),
+        const execution = await runOCIContainer(name, [
+            ...gpuContainerArgs(name, language),
             '--gpus', `device=${device.uuid}`,
             '--env', 'NVIDIA_DRIVER_CAPABILITIES=compute,utility',
             '--volume', `${workdir}:/work:ro`,
@@ -552,4 +690,82 @@ export async function runGPUContainer(
         if (execution.timedOut) return { code, stdout, stderr, compiled, timeout: 'execute', results };
     }
     return { code, stdout, stderr, compiled, timeout: null, results };
+}
+
+export async function runGPUProfiles(
+    workdir: string,
+    device: GPUDevice,
+    rid: string,
+    cases: NormalizedGPUCase[],
+    language: GPULanguage,
+    onResult?: (result: GPUProfileArtifactResult) => Promise<void> | void,
+) {
+    const config = getConfig('gpu');
+    const safeRid = rid.replace(/[^A-Za-z0-9_.-]/g, '').slice(-24);
+    const profileDir = path.join(workdir, 'profile');
+    await fs.ensureDir(profileDir);
+    const results: GPUProfileArtifactResult[] = [];
+    const publish = async (result: GPUProfileArtifactResult) => {
+        results.push(result);
+        await onResult?.(result);
+    };
+
+    const compileName = `hydro-gpu-profile-compile-${safeRid}-${randomSuffix()}`;
+    const compile = await runOCIContainer(compileName, [
+        ...gpuContainerArgs(compileName, language, config.profile_tmpfs),
+        '--volume', `${workdir}:/work:rw`,
+        '--workdir', '/work',
+        config.container_image,
+        '/bin/bash', '/work/compile.sh',
+    ], config.compile_timeout);
+    const compiled = compile.code === 0 && compile.stdout.includes('HYDRO_GPU_COMPILE_OK');
+    if (!compiled || compile.timedOut) {
+        for (const test of cases) {
+            await publish({
+                id: test.id,
+                code: compile.code,
+                stdout: compile.stdout,
+                stderr: compile.stderr || 'Nsight Compute profile compilation failed.',
+                timedOut: compile.timedOut,
+            });
+        }
+        return results;
+    }
+
+    for (const test of cases) {
+        const name = `hydro-gpu-profile-${test.id}-${safeRid}-${randomSuffix()}`;
+        const execution = await runOCIContainer(name, [
+            ...gpuContainerArgs(name, language, config.profile_tmpfs),
+            '--gpus', `device=${device.uuid}`,
+            '--env', 'NVIDIA_DRIVER_CAPABILITIES=compute,utility',
+            '--volume', `${workdir}:/work:ro`,
+            '--volume', `${profileDir}:/profile:rw`,
+            '--workdir', '/work',
+            config.container_image,
+            '/bin/bash', '/work/profile.sh', test.id.toString(),
+        ], config.profile_timeout);
+        const reportPath = path.join(workdir, 'profile', `case-${test.id}.ncu-rep`);
+        const summaryPath = path.join(workdir, 'profile', `case-${test.id}.summary.json`);
+        let validArtifacts = execution.code === 0 && !execution.timedOut
+            && await fs.pathExists(reportPath) && await fs.pathExists(summaryPath);
+        if (validArtifacts) {
+            try {
+                const summary = JSON.parse(await fs.readFile(summaryPath, 'utf8'));
+                validArtifacts = Number.isSafeInteger(summary.actionCount) && summary.actionCount > 0;
+                if (!validArtifacts) execution.stderr += '\nNsight Compute did not capture a target kernel.';
+            } catch (error) {
+                validArtifacts = false;
+                execution.stderr += `\nUnable to validate the Nsight Compute summary: ${error.message}`;
+            }
+        }
+        await publish({
+            id: test.id,
+            code: execution.code,
+            stdout: execution.stdout,
+            stderr: execution.stderr,
+            timedOut: execution.timedOut,
+            ...validArtifacts ? { reportPath, summaryPath } : {},
+        });
+    }
+    return results;
 }

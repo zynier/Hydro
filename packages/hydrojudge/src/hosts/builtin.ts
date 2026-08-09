@@ -50,6 +50,11 @@ const session: Session = {
     async postFile(target: string, filename: string, filepath: string) {
         return await JudgeHandler.processJudgeFileCallback(new ObjectId(target), filename, filepath);
     },
+    async postGPUProfile(target, caseId, profile, reportFile, summaryFile) {
+        await JudgeHandler.processGPUProfileCallback(
+            new ObjectId(target), caseId, profile, reportFile, summaryFile,
+        );
+    },
 };
 
 export async function apply(ctx: HydroContext) {

@@ -1,5 +1,5 @@
 import {
-    DetailType, JudgeResultBody, type LangConfig, NormalizedSubtask, ProblemConfigFile,
+    DetailType, GPUProfileState, JudgeResultBody, type LangConfig, NormalizedSubtask, ProblemConfigFile,
 } from '@hydrooj/common';
 import { CopyInFile } from './sandbox';
 import type { JudgeTask } from './task';
@@ -29,5 +29,12 @@ export interface Session {
     getReporter: (task: JudgeTask) => { next: NextFunction, end: NextFunction };
     fetchFile: <T extends null | string>(namespace: T, files: Record<string, string>, ctx: JudgeTask) => Promise<T extends null ? string : null>;
     postFile: (target: string, filename: string, file: string) => Promise<void>;
+    postGPUProfile?: (
+        target: string,
+        caseId: number,
+        profile: GPUProfileState,
+        reportFile?: string,
+        summaryFile?: string,
+    ) => Promise<void>;
     config: { detail: DetailType, host?: string, trusted?: boolean };
 }

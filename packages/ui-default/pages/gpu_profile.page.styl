@@ -1,0 +1,359 @@
+.page--gpu_profile
+  .gpu-profile__status
+    align-items: center
+    display: flex
+    font-size: rem(18px)
+    gap: rem(8px)
+    margin-bottom: rem(14px)
+
+  .gpu-profile__status--ready
+    color: $success-color
+
+  .gpu-profile__status--pending
+    color: #8a6500
+
+  .gpu-profile__status--error
+    color: #c7352b
+
+  .gpu-profile__facts
+    display: grid
+    gap: rem(16px 22px)
+    grid-template-columns: repeat(auto-fit, minmax(rem(170px), 1fr))
+    margin: rem(8px 0 2px)
+
+    > div
+      border-left: 3px solid #dbe2e7
+      min-width: 0
+      padding-left: rem(10px)
+
+    dt
+      color: $text-3-color
+      font-size: rem(12px)
+      font-weight: 600
+      letter-spacing: 0
+      margin-bottom: rem(3px)
+      text-transform: uppercase
+
+    dd
+      color: $text-1-color
+      margin: 0
+      overflow-wrap: anywhere
+
+  .gpu-profile__facts--compact
+    grid-template-columns: repeat(auto-fit, minmax(rem(240px), 1fr))
+    max-width: rem(720px)
+
+  .gpu-profile__table-wrap
+    overflow-x: auto
+
+  .gpu-profile__timing,
+  .gpu-profile__kernels
+    min-width: rem(840px)
+
+  .gpu-profile__sections
+    min-width: rem(560px)
+
+  .gpu-profile__section-items
+    min-width: rem(760px)
+
+    td:nth-child(1)
+      color: $text-3-color
+      max-width: rem(220px)
+
+    td:nth-child(2)
+      max-width: rem(520px)
+
+  .gpu-profile__metric-label[title]
+    border-bottom: 1px dotted $text-3-color
+    cursor: help
+
+  .gpu-profile__metrics
+    min-width: rem(880px)
+
+    td:first-child
+      max-width: rem(640px)
+
+      > code
+        overflow-wrap: anywhere
+        white-space: normal
+
+  .gpu-profile__focus-metrics
+    min-width: rem(720px)
+
+    td:first-child code
+      overflow-wrap: anywhere
+      white-space: normal
+
+  .gpu-profile__instances
+    min-width: rem(480px)
+
+    th:first-child,
+    td:first-child
+      width: rem(90px)
+
+  .gpu-profile__timing-note
+    display: flex
+    flex-wrap: wrap
+    gap: rem(8px 28px)
+
+  .gpu-profile__dimension
+    color: $text-1-color
+    font-family: $code-font-family
+
+  .gpu-profile__muted,
+  .gpu-profile__description
+    color: $text-3-color
+    font-size: rem(12px)
+
+  .gpu-profile__description
+    line-height: 1.45
+    margin-top: rem(4px)
+
+  .gpu-profile__links
+    min-width: rem(180px)
+
+    a
+      display: block
+      line-height: 1.8
+
+  .gpu-profile__heading-count,
+  .gpu-profile__count
+    color: $text-3-color
+    font-size: rem(12px)
+    font-weight: 400
+
+  .gpu-profile__kernel-bar
+    align-items: center
+    background: $toolbar-bg
+    border-bottom: 1px solid $table-border-color
+    display: flex
+    justify-content: space-between
+    margin-bottom: rem(18px)
+    min-height: rem(48px)
+    overflow: hidden
+    padding-left: rem(15px)
+
+  .gpu-profile__kernel-name
+    align-items: center
+    display: flex
+    gap: rem(8px)
+    min-width: 0
+    padding-right: rem(20px)
+
+    strong
+      overflow: hidden
+      text-overflow: ellipsis
+      white-space: nowrap
+
+  .gpu-profile__tabs,
+  .gpu-profile__file-tabs
+    display: flex
+    overflow-x: auto
+
+  .gpu-profile__tab,
+  .gpu-profile__file-tab
+    border-bottom: 3px solid transparent
+    color: $toolbar-fore
+    flex: 0 0 auto
+    padding: rem(14px 13px 11px)
+    text-decoration: none
+
+    &:hover,
+    &.is-active
+      border-bottom-color: $primary-color
+      color: $toolbar-fore-hover
+      text-decoration: none
+
+    &.is-active
+      font-weight: 600
+
+  .gpu-profile__file-tabs
+    border-bottom: 1px solid $table-border-color
+    padding: rem(0 12px)
+
+  .gpu-profile__pager
+    align-items: center
+    border-top: 1px solid $table-border-color
+    display: flex
+    justify-content: center
+    min-height: rem(48px)
+    padding: rem(0 15px)
+
+    + .section__body
+      border-top: 1px solid $table-border-color
+
+    .pager
+      align-items: center
+      display: flex
+      margin: 0
+
+    .pager__item
+      min-width: rem(34px)
+      padding: rem(8px 9px)
+      text-align: center
+
+    .pager__item.disabled
+      opacity: .35
+      pointer-events: none
+
+  .gpu-profile__section-switcher
+    align-items: center
+    display: flex
+    gap: rem(8px)
+
+    .button
+      align-items: center
+      display: inline-flex
+      height: rem(34px)
+      justify-content: center
+      padding: 0
+      width: rem(34px)
+
+  .gpu-profile__kernel-context
+    color: $text-2-color
+    font-family: $code-font-family
+    overflow-wrap: anywhere
+
+  .gpu-profile__recommendations
+    border-top: 1px solid $table-border-color
+
+  .gpu-profile__markers
+    border-bottom: 1px solid $table-border-color
+
+  .gpu-profile__marker
+    border-left: 3px solid #d39e2b
+    display: flex
+    flex-wrap: wrap
+    gap: rem(5px 12px)
+    padding: rem(7px 0 7px 10px)
+
+    code
+      color: $text-2-color
+      font-size: rem(12px)
+
+    span
+      overflow-wrap: anywhere
+
+  .gpu-profile__recommendation
+    border-bottom: 1px solid $table-border-color
+    padding: rem(8px 0)
+
+    &:last-child
+      border-bottom: 0
+
+    p
+      margin: rem(5px 0 0)
+
+  .gpu-profile__estimate
+    color: #8a6500
+    font-size: rem(13px)
+    margin-left: rem(12px)
+
+  .gpu-profile__rules
+    padding-top: 0
+
+  .gpu-profile__rule
+    border-bottom: 1px solid $table-border-color
+    padding: rem(20px 0)
+
+    &:last-child
+      border-bottom: 0
+
+    h2
+      font-size: rem(18px)
+      margin: 0 0 rem(10px)
+
+      small
+        color: $text-3-color
+        font-size: rem(12px)
+        font-weight: 400
+        margin-left: rem(8px)
+
+    > .gpu-profile__estimate
+      margin-left: 0
+
+  .gpu-profile__output,
+  .gpu-profile__source
+    margin: 0
+    max-height: 75vh
+    overflow: auto
+    white-space: pre
+
+  .gpu-profile__source
+    background: $syntax-hl-bg-color
+    font-size: rem(12px)
+    line-height: 1.55
+    padding: rem(14px 16px)
+
+  +mobile()
+    .section__header
+      padding-bottom: rem(12px)
+
+      .section__title
+        line-height: 1.35
+        overflow-wrap: anywhere
+
+    .section__tools
+      display: flex
+      flex-wrap: wrap
+      gap: rem(6px)
+      margin-top: rem(10px)
+      position: static
+
+    .gpu-profile__kernel-bar
+      align-items: stretch
+      flex-direction: column
+      padding-left: 0
+
+    .gpu-profile__kernel-name
+      padding: rem(12px 15px 4px)
+
+    .gpu-profile__tabs
+      padding-left: rem(2px)
+
+    .gpu-profile__pager
+      align-items: center
+      padding-bottom: rem(7px)
+      padding-top: rem(7px)
+
+      .pager
+        max-width: 100%
+        overflow-x: auto
+
+      .pager__item.previous,
+      .pager__item.next
+        display: inline-block
+
+    .gpu-profile__estimate
+      display: block
+      margin: rem(4px 0 0)
+
+.theme--dark.page--gpu_profile
+  .gpu-profile__facts > div
+    border-left-color: #4a4c4e
+
+  .gpu-profile__facts dd,
+  .gpu-profile__dimension
+    color: #ddd
+
+  .gpu-profile__facts dt,
+  .gpu-profile__muted,
+  .gpu-profile__description,
+  .gpu-profile__heading-count,
+  .gpu-profile__count
+    color: #aaa
+
+  .gpu-profile__kernel-bar
+    background: #252728
+
+  .gpu-profile__tab,
+  .gpu-profile__file-tab
+    color: #bbb
+
+    &:hover,
+    &.is-active
+      color: #eee
+
+  .gpu-profile__source
+    background: #171819
+    color: #ddd

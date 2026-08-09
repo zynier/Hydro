@@ -158,6 +158,66 @@ describe('GPU operator judge', () => {
             expect(compile).to.not.include('nvcc');
             expect(runner).to.include('GPU judge requires TileLang 0.1.13');
             expect(runner).to.include('Missing Python function');
+            expect(runner).to.include('def run_profile_case(module, kernel, case_id):');
+        } finally {
+            await fs.remove(folder);
+        }
+    });
+
+    it('generates an isolated full NCU profile pass', async () => {
+        const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'hydro-gpu-profile-test-'));
+        try {
+            const testcase = path.join(folder, 'trusted-testcase.py');
+            await fs.writeFile(testcase, '# trusted testcase definition\n');
+            await prepareGPUWorkdir(
+                folder,
+                'extern "C" void run_kernel() {}\n',
+                testcase,
+                'run_kernel',
+                [{ id: 3, memory: 512, warmup: 3, repeats: 30 }],
+                {
+                    index: 0,
+                    uuid: 'GPU-0',
+                    name: 'Example GPU',
+                    computeCapability: '9.0',
+                    memoryMiB: 81920,
+                    freeMemoryMiB: 80000,
+                    bandwidthGBps: 2000,
+                    fp32TFLOPS: 50,
+                    pciBusId: '0000:01:00.0',
+                },
+                'cuda',
+                {
+                    profile: true,
+                    profileMeasureRun: 2,
+                    profileNcu: 'ncu',
+                    profileSet: 'full',
+                    profileMaxInstances: 5000,
+                },
+            );
+            const compile = await fs.readFile(path.join(folder, 'compile.sh'), 'utf8');
+            const runner = await fs.readFile(path.join(folder, 'runner.py'), 'utf8');
+            const script = await fs.readFile(path.join(folder, 'profile.sh'), 'utf8');
+            const profileFunction = runner.slice(
+                runner.indexOf('def run_profile_case'),
+                runner.indexOf('\ndef main():'),
+            );
+            expect(compile).to.include('-lineinfo');
+            expect(compile).to.not.include(' -G ');
+            expect(runner).to.include('PROFILE_MEASURE_RUN = 2');
+            expect(profileFunction).to.include('torch.cuda.nvtx.range_push(range_name)');
+            expect(profileFunction).to.include('kernel(*target_inputs)');
+            expect(profileFunction).to.not.include('checkCorrectness');
+            expect(script).to.include('--set "$section_set"');
+            expect(script).to.include('--nvtx-include "$range_name/"');
+            expect(script).to.include('--replay-mode kernel');
+            expect(script).to.include('--target-processes application-only');
+            expect(script).to.include('--import-sass on');
+            expect(script).to.include('--import-source on');
+            expect(script).to.include('--export "$report"');
+            expect(script).to.include('--print-source ptx');
+            expect(script).to.include('profile_summary.py');
+            expect(await fs.pathExists(path.join(folder, 'profile_summary.py'))).to.equal(true);
         } finally {
             await fs.remove(folder);
         }

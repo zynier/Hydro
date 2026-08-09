@@ -537,6 +537,9 @@ problem.import.problem_description: '## Description'
 Problems Sets: 문제 셋
 Problems: 문제
 Profile Background Image: 프로필 배경
+Profile failed: 프로파일 수집 실패
+Profile pending: 프로파일 수집 중
+Profile ready: 프로파일 준비됨
 Progress: 진행
 Properties: 특성
 Public: 공개

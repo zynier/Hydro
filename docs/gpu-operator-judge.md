@@ -6,9 +6,9 @@ Hydro's `gpu` problem type follows the XPUOJ operator workflow: trusted problem 
 
 - NVIDIA driver and NVIDIA Container Toolkit.
 - An OCI runtime such as Docker.
-- A development image containing PyTorch with CUDA support, Python 3, `nvcc`, and TileLang 0.1.13 when TileLang submissions are enabled.
+- A development image containing PyTorch with CUDA support, Python 3, `nvcc`, Nsight Compute 2025.4.1, and TileLang 0.1.13 when TileLang submissions are enabled.
 
-The default base image is `pytorch/pytorch:2.13.0-cuda13.0-cudnn9-devel`. Build the bundled image to add the pinned TileLang runtime:
+The default base image is `pytorch/pytorch:2.13.0-cuda13.0-cudnn9-devel`. Build the bundled image to add the pinned Nsight Compute and TileLang runtimes:
 
 ```bash
 docker build -t hydro-gpu-tilelang:0.1.13 packages/hydrojudge/gpu
@@ -29,6 +29,16 @@ docker build --build-arg PYTORCH_IMAGE=pytorch/pytorch:2.13.0-cuda13.0-cudnn9-de
 ```
 
 Set `hydrojudge.gpu.container_image` to that tag. The other relevant judge settings are `runtime`, `nvidia_smi`, `nvcc`, `lock_dir`, `compile_timeout`, `execution_timeout`, `cpus`, `memory`, and `pids_limit`.
+
+Nsight Compute profiling is enabled by default for GPU problems. Its settings are:
+
+- `profile_enabled`: generate profiles after the clean timing pass.
+- `profile_ncu`: NCU executable inside the image, defaulting to `ncu`.
+- `profile_set`: NCU section set, defaulting to `full`.
+- `profile_timeout`: per-testcase profile timeout in milliseconds.
+- `profile_measure_run`: measured target invocation to reproduce and profile.
+- `profile_max_instances`: maximum raw metric instance values copied into the web summary. The `.ncu-rep` remains complete.
+- `profile_tmpfs`: executable temporary filesystem size used by NCU and TileLang JIT.
 
 ## Problem files
 
@@ -137,11 +147,19 @@ Matching PyTorch is 50 points and matching the hardware estimate is 100 points. 
 
 The CUDA runtime probe derives memory bandwidth and FP32 throughput from device properties. FP16/BF16 work uses twice the probed FP32 rate, so the roofline is a stable comparison anchor rather than a promise of achievable tensor-core performance.
 
+## Nsight Compute profiles
+
+The clean pass completes first and remains the only source of timing and score data. Hydro then keeps the assigned GPU lease and runs one independent NCU pass per testcase. The selected measured target invocation is enclosed in an NVTX push/pop range; baseline work, correctness checking, input generation, and compilation are outside that range. CUDA profile builds add `-lineinfo` but not `-G`. TileLang JIT is absorbed by the same warmup sequence used by the clean pass before the selected invocation.
+
+The record page exposes a stable profile link for every testcase as soon as clean judging finishes. The profile page refreshes while collection is pending, then shows clean timing, launch configuration, occupancy, full NCU details sections, raw metrics and instance values, rules and focus metrics, source markers, imported source, CUDA/PTX/SASS output, warnings, and session information. The original `.ncu-rep` can be downloaded for Nsight Compute GUI. Reports remain associated with the matching record history revision if a rejudge starts while collection is still running.
+
+Profile artifacts use the judge-only upload endpoint and are stored under the Hydro storage namespace. Web access and signed report downloads reuse record-detail visibility checks. Contest projections remove profile data whenever testcase details are hidden.
+
 ## Scheduling and isolation
 
 Hydro waits for a matching device with no active compute process and enough free memory. A per-UUID atomic lock prevents concurrent assignment by multiple Hydro processes.
 
-Submission compilation and execution run in a read-only, network-disabled container with capabilities dropped, a PID limit, CPU/memory limits, and access to only the assigned GPU UUID. The ordinary Go Judge path remains unchanged for non-GPU problems.
+Submission compilation and execution run in a read-only, network-disabled container with capabilities dropped, a PID limit, CPU/memory limits, and access to only the assigned GPU UUID. Profile execution also mounts trusted code and scripts read-only, with a separate writable artifact directory. The ordinary Go Judge path remains unchanged for non-GPU problems.
 
 The displayed memory value is the benchmark process's peak CPU RSS, matching XPUOJ's reporting convention. The YAML `memory` value separately controls GPU scheduling. Result payloads are authenticated with a per-process random nonce and SHA-256 before Hydro accepts their timing or checker data.
 

@@ -5,7 +5,7 @@ import { omit } from 'lodash';
 import { ObjectId } from 'mongodb';
 import sanitize from 'sanitize-filename';
 import {
-    JudgeMeta, JudgeResultBody, ProblemConfigFile, TestCase,
+    GPUProfileState, JudgeMeta, JudgeResultBody, ProblemConfigFile, TestCase,
 } from '@hydrooj/common';
 import { sleep } from '@hydrooj/utils';
 import { Context } from '../context';
@@ -67,6 +67,7 @@ function processPayload(body: Partial<JudgeResultBody>) {
     if (Number.isFinite(body.memory)) $set.memory = body.memory;
     if (body.progress !== undefined) $set.progress = body.progress;
     if (body.subtasks) $set.subtasks = body.subtasks;
+    if (body.gpuProfiles) $set.gpuProfiles = body.gpuProfiles;
     if (body.addProgress) $inc.progress = body.addProgress;
     return {
         $set, $push, $unset, $inc,
@@ -271,6 +272,83 @@ export class JudgeFileUpdateHandler extends Handler {
     }
 }
 
+export async function processGPUProfileCallback(
+    rid: ObjectId,
+    caseId: number,
+    profile: GPUProfileState,
+    reportFile?: string,
+    summaryFile?: string,
+) {
+    if (!Number.isSafeInteger(caseId) || caseId <= 0) throw new ValidationError('caseId');
+    if (!profile || !/^[a-f0-9]{32}$/.test(profile.id)) throw new ValidationError('profile');
+    if (!['pending', 'ready', 'error'].includes(profile.status)) throw new ValidationError('profile');
+    if (!['cuda', 'tilelang'].includes(profile.language)) throw new ValidationError('profile');
+    const rdoc = await record.get(rid);
+    if (!rdoc) return false;
+    const field = `gpuProfiles.${caseId}`;
+    const updateCurrent = rdoc.gpuProfiles?.[caseId]?.id === profile.id;
+    const history = updateCurrent ? null : await record.collHistory.findOne({
+        rid,
+        [`${field}.id`]: profile.id,
+    });
+    if (!updateCurrent && !history) return false;
+
+    const basePath = `gpu-profile/${rid.toHexString()}/${profile.id}/case-${caseId}`;
+    const nextProfile: GPUProfileState = omit(profile, ['reportPath', 'summaryPath']) as GPUProfileState;
+    const uploaded: string[] = [];
+    try {
+        if (profile.status === 'ready') {
+            if (!reportFile || !summaryFile) throw new ValidationError('profile artifacts');
+            nextProfile.reportPath = `${basePath}.ncu-rep`;
+            nextProfile.summaryPath = `${basePath}.summary.json`;
+            await storage.put(nextProfile.reportPath, reportFile, rdoc.uid);
+            uploaded.push(nextProfile.reportPath);
+            await storage.put(nextProfile.summaryPath, summaryFile, rdoc.uid);
+            uploaded.push(nextProfile.summaryPath);
+        }
+        const updated = updateCurrent
+            ? await record.coll.findOneAndUpdate(
+                { _id: rid, [`${field}.id`]: profile.id },
+                { $set: { [field]: nextProfile } },
+                { returnDocument: 'after' },
+            )
+            : await record.collHistory.findOneAndUpdate(
+                { _id: history._id, [`${field}.id`]: profile.id },
+                { $set: { [field]: nextProfile } },
+                { returnDocument: 'after' },
+            );
+        if (!updated) {
+            await storage.del(uploaded);
+            return false;
+        }
+        if (updateCurrent) bus.broadcast('record/change', updated as RecordDoc, { [field]: nextProfile });
+        return true;
+    } catch (error) {
+        await storage.del(uploaded);
+        throw error;
+    }
+}
+
+export class JudgeGPUProfileUpdateHandler extends Handler {
+    notUsage = true;
+
+    @post('rid', Types.ObjectId)
+    @post('caseId', Types.PositiveInt)
+    @post('profile', Types.String)
+    async post({ }, rid: ObjectId, caseId: number, rawProfile: string) {
+        let profile: GPUProfileState;
+        try {
+            profile = JSON.parse(rawProfile);
+        } catch {
+            throw new ValidationError('profile');
+        }
+        const report = this.request.files?.report?.filepath;
+        const summary = this.request.files?.summary?.filepath;
+        const updated = await processGPUProfileCallback(rid, caseId, profile, report, summary);
+        this.response.body = { ok: updated ? 1 : 0 };
+    }
+}
+
 export class JudgeConnectionHandler extends ConnectionHandler {
     category = '#judge';
     query: any = { type: { $in: ['judge', 'generate'] } };
@@ -358,6 +436,7 @@ export class JudgeConnectionHandler extends ConnectionHandler {
 export async function apply(ctx: Context) {
     ctx.Route('judge_files_download', '/judge/files', JudgeFilesDownloadHandler, builtin.PRIV.PRIV_JUDGE);
     ctx.Route('judge_files_upload', '/judge/upload', JudgeFileUpdateHandler, builtin.PRIV.PRIV_JUDGE);
+    ctx.Route('judge_gpu_profile_upload', '/judge/gpu-profile', JudgeGPUProfileUpdateHandler, builtin.PRIV.PRIV_JUDGE);
     ctx.Connection('judge_conn', '/judge/conn', JudgeConnectionHandler, builtin.PRIV.PRIV_JUDGE);
     ctx.on('record/judge', async (rdoc, updated, pdoc, t) => {
         if (!pdoc || rdoc.status !== STATUS.STATUS_HACK_SUCCESSFUL) return;

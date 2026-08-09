@@ -37,6 +37,9 @@ problem_type.objective: 'Type: Objective'
 problem_type.remote_judge: 'Type: RemoteJudge'
 problem_type.submit_answer: 'Type: SubmitAnswer'
 GPU hardware: GPU hardware
+Profile failed: Profile failed
+Profile pending: Profile pending
+Profile ready: Profile ready
 Any compatible GPU: Any compatible GPU
 Theoretical lower bound: Theoretical lower bound
 No compatible GPU is currently available.: No compatible GPU is currently available.

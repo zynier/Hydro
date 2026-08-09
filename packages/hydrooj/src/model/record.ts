@@ -154,6 +154,7 @@ export default class RecordModel {
             judgeTexts: [],
             compilerTexts: [],
             testCases: [],
+            gpuProfiles: {},
             judger: null,
             judgeAt: null,
             rejudged: false,
@@ -246,6 +247,7 @@ export default class RecordModel {
             subtasks: {},
             judgeTexts: [],
             compilerTexts: [],
+            gpuProfiles: {},
             judgeAt: null,
             judger: null,
         };
@@ -259,7 +261,7 @@ export default class RecordModel {
             await RecordModel.collHistory.insertMany(rdocs.map((rdoc) => ({
                 ...pick(rdoc, [
                     'compilerTexts', 'judgeTexts', 'testCases', 'subtasks',
-                    'score', 'time', 'memory', 'status', 'judgeAt', 'judger',
+                    'gpuProfiles', 'score', 'time', 'memory', 'status', 'judgeAt', 'judger',
                 ]),
                 rid: rdoc._id,
                 _id: new ObjectId(),
