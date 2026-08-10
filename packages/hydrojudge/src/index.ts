@@ -4,7 +4,7 @@ import {
     Context, SettingModel, SystemModel,
 } from 'hydrooj';
 import { JudgeSettings, overrideConfig } from './config';
-import { registerGPUExample } from './example';
+import { registerGPUDenseGemmExample, registerGPUExample, registerGPUTopPRenormExample } from './example';
 import { TILELANG_VERSION, TIRX_VERSION, TRITON_VERSION } from './gpu/languages';
 
 export const Config = JudgeSettings;
@@ -78,6 +78,8 @@ export async function apply(ctx: Context, config: ReturnType<typeof Config>) {
     overrideConfig(config);
     await ensureGPULanguages();
     registerGPUExample(ctx);
+    registerGPUDenseGemmExample(ctx);
+    registerGPUTopPRenormExample(ctx);
     if (process.env.NODE_APP_INSTANCE !== '0') return;
     // eslint-disable-next-line consistent-return
     if (!config.disable) return require('./hosts/builtin').apply(ctx);

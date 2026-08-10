@@ -1,0 +1,17 @@
+type: gpu
+langs:
+  - cuda
+  - tilelang
+  - tirx
+  - triton
+time: 180s
+memory: 48g
+gpu:
+  entry: run_kernel
+  testcase: testcase_config.py
+  cases:
+    - id: 1
+    - id: 2
+    - id: 3
+    - id: 4
+    - id: 5

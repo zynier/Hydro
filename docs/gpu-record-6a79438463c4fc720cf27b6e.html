@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>读懂一次 TileLang GPU 提交</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Noto+Sans+SC:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@6.0.1/dist/reveal.css">
+  <style>
+    :root {
+      --ink: #edf2f7;
+      --muted: #aab7c4;
+      --bg: #0c1117;
+      --panel: #141c24;
+      --panel-2: #1a2530;
+      --line: #2a3948;
+      --cyan: #55d6d2;
+      --orange: #ffb45d;
+      --red: #ff7d7d;
+      --green: #91d69a;
+      --blue: #84b9ff;
+    }
+    html, body, body.reveal-viewport { margin: 0; background: var(--bg) !important; }
+    .reveal { background: var(--bg); color: var(--ink); font-family: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 28px; }
+    .reveal .slides { text-align: left; }
+    .reveal section { height: 100%; box-sizing: border-box; padding: 46px 64px 42px; }
+    .reveal h1, .reveal h2, .reveal h3 { color: var(--ink); font-weight: 760; letter-spacing: 0; text-transform: none; }
+    .reveal h1 { font-size: 2.15em; line-height: 1.08; margin: 0 0 18px; }
+    .reveal h2 { font-size: 1.35em; margin: 0 0 18px; }
+    .reveal h3 { font-size: .88em; margin: 0 0 10px; }
+    .reveal p { color: var(--muted); line-height: 1.5; margin: 10px 0; }
+    .reveal li { color: var(--muted); line-height: 1.45; margin: 7px 0; }
+    .reveal strong { color: var(--ink); }
+    .reveal code { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
+    .reveal pre { width: 100%; margin: 0; box-shadow: none; }
+    .reveal pre code { display: block; box-sizing: border-box; width: 100%; max-height: 550px; padding: 22px 24px; overflow: auto; white-space: pre; border: 1px solid var(--line); background: #0a0f14; color: #d9e6ef; border-radius: 8px; font-size: .52em; line-height: 1.42; }
+    .eyebrow { color: var(--cyan); font: 700 .46em/1.2 "JetBrains Mono", monospace; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 16px; }
+    .subtitle { font-size: .78em; color: var(--muted); max-width: 850px; }
+    .micro { font-size: .48em; color: #8697a6; }
+    .accent { color: var(--cyan); }
+    .orange { color: var(--orange); }
+    .red { color: var(--red); }
+    .green { color: var(--green); }
+    .blue { color: var(--blue); }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: stretch; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 20px 22px; }
+    .panel.tight { padding: 14px 16px; }
+    .metric { font: 800 1.45em/1 "JetBrains Mono", monospace; color: var(--ink); }
+    .metric-label { color: var(--muted); font-size: .49em; margin-top: 8px; }
+    .tag { display: inline-block; padding: 5px 9px; border: 1px solid #355264; color: var(--cyan); border-radius: 999px; font: 700 .43em/1 "JetBrains Mono", monospace; margin: 3px 4px 3px 0; }
+    .callout { border-left: 3px solid var(--orange); padding: 8px 0 8px 16px; color: #d7e2e9; font-size: .72em; line-height: 1.45; }
+    .callout.cyan { border-color: var(--cyan); }
+    .callout.red { border-color: var(--red); }
+    .formula { text-align: center; font: 700 1.05em/1.2 "JetBrains Mono", monospace; color: var(--orange); padding: 18px 0; }
+    .small-table { width: 100%; border-collapse: collapse; font-size: .53em; }
+    .small-table th, .small-table td { border-bottom: 1px solid var(--line); padding: 9px 10px; text-align: left; vertical-align: top; }
+    .small-table th { color: var(--cyan); font-weight: 700; }
+    .small-table td { color: var(--muted); }
+    .small-table .mono { font-family: "JetBrains Mono", monospace; color: #dbe7ef; }
+    .flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; align-items: center; margin: 24px 0; }
+    .flow .box { min-height: 108px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 13px 12px; text-align: center; font-size: .52em; color: var(--muted); }
+    .flow .box b { display: block; color: var(--ink); font-size: 1.25em; margin-bottom: 8px; }
+    .flow .arrow { color: var(--orange); text-align: center; font-size: 1.2em; }
+    .arch { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 14px; align-items: stretch; margin: 18px 0 12px; }
+    .arch .layer { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 15px; min-height: 148px; }
+    .arch .layer h3 { color: var(--orange); }
+    .arch .layer p { font-size: .56em; margin: 5px 0; }
+    .sm-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-top: 9px; }
+    .sm-grid i { display: block; height: 20px; border-radius: 3px; background: #2d5260; border: 1px solid #477d83; }
+    .sm-grid i:nth-child(3n) { background: #8b6337; border-color: #c18a48; }
+    .tile-diagram { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; align-items: center; margin-top: 18px; }
+    .tile-diagram.five { grid-template-columns: 1fr 72px 1fr 72px 1fr; }
+    .matrix { border: 1px solid #4a6577; background: #0f1820; padding: 12px; border-radius: 6px; }
+    .matrix .matrix-title { font: 700 .47em/1 "JetBrains Mono", monospace; color: var(--cyan); margin-bottom: 10px; }
+    .matrix .cells { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; }
+    .matrix .cells i { aspect-ratio: 1; background: #224354; border-radius: 2px; }
+    .matrix.a .cells i:nth-child(8n+1), .matrix.a .cells i:nth-child(8n+2), .matrix.a .cells i:nth-child(8n+3) { background: #b16d38; }
+    .matrix.b .cells i:nth-child(2n) { background: #3c8b83; }
+    .matrix.c .cells i { background: #466b98; }
+    .tile-diagram .op { text-align: center; color: var(--orange); font: 800 1.5em/1 "JetBrains Mono", monospace; }
+    .role-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; margin-top: 14px; }
+    .role { padding: 15px 16px; background: var(--panel); border: 1px solid var(--line); border-top: 3px solid var(--cyan); border-radius: 7px; }
+    .role:nth-child(2) { border-top-color: var(--orange); }
+    .role:nth-child(3) { border-top-color: var(--green); }
+    .role b { display: block; color: var(--ink); font-size: .67em; margin-bottom: 8px; }
+    .role span { color: var(--muted); font-size: .48em; line-height: 1.45; }
+    .timeline { position: relative; margin: 28px 0 0; padding-top: 42px; display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+    .timeline:before { content: ""; position: absolute; left: 3%; right: 3%; top: 24px; border-top: 2px solid #42606d; }
+    .phase { position: relative; text-align: center; }
+    .phase:before { content: ""; position: absolute; top: -26px; left: 50%; width: 12px; height: 12px; transform: translateX(-50%); background: var(--orange); border-radius: 50%; box-shadow: 0 0 0 4px #3a2b1d; }
+    .phase b { display: block; color: var(--ink); font-size: .5em; }
+    .phase span { display: block; color: var(--muted); font-size: .42em; line-height: 1.35; margin-top: 7px; }
+    .bars { margin-top: 16px; }
+    .bar-row { display: grid; grid-template-columns: 58px 1fr 92px; gap: 10px; align-items: center; margin: 9px 0; font-size: .49em; color: var(--muted); }
+    .bar { height: 18px; background: #1c2a35; border-radius: 3px; overflow: hidden; }
+    .bar i { display: block; height: 100%; background: var(--cyan); border-radius: 3px; }
+    .bar-row:nth-child(2) .bar i { background: var(--orange); }
+    .bar-row:nth-child(3) .bar i { background: var(--blue); }
+    .bar-row:nth-child(4) .bar i { background: var(--green); }
+    .bar-row:nth-child(5) .bar i { background: #c99bff; }
+    .bar-row em { font: 700 .96em/1 "JetBrains Mono", monospace; color: var(--ink); font-style: normal; text-align: right; }
+    .quote { font-size: .83em; color: #dce8ef; line-height: 1.5; border-left: 3px solid var(--cyan); padding-left: 18px; max-width: 900px; }
+    .footer { position: absolute; left: 64px; bottom: 18px; color: #60717f; font: .4em/1 "JetBrains Mono", monospace; }
+    .slide-no { position: absolute; right: 64px; bottom: 18px; color: #60717f; font: .4em/1 "JetBrains Mono", monospace; }
+    .reveal .progress { color: var(--cyan); height: 3px; }
+    .reveal .controls { color: var(--cyan); }
+    .code-note { margin-top: 10px; font-size: .48em; color: #8da0ad; }
+    .two-col-code { display: grid; grid-template-columns: 1.15fr .85fr; gap: 18px; align-items: start; }
+    .compact-entry .panel p { font-size: .62em; }
+    .compact-cards .panel { padding: 13px 16px; }
+    .compact-cards .panel h3 { font-size: .78em; margin-bottom: 6px; }
+    .compact-cards .panel p { font-size: .62em; line-height: 1.34; }
+    .compact-cards .check-list li, .compact-cards .warn-list li { font-size: .54em; line-height: 1.3; margin: 4px 0; }
+    .compact-cards .callout { font-size: .58em; }
+    .tile-slide .panel.tight { padding: 10px 14px; }
+    .tile-slide .panel.tight p { font-size: .56em; line-height: 1.22; margin: 6px 0 0; }
+    .tile-slide > .micro { margin-top: 10px; }
+    .check-list, .warn-list { list-style: none; margin: 0; padding: 0; }
+    .check-list li, .warn-list li { padding-left: 25px; position: relative; font-size: .62em; }
+    .check-list li:before { content: "✓"; position: absolute; left: 0; color: var(--green); font-weight: 800; }
+    .warn-list li:before { content: "!"; position: absolute; left: 0; color: var(--orange); font-weight: 900; }
+    @media (max-width: 800px) {
+      .reveal { font-size: 22px; }
+      .reveal section { padding: 30px 24px 36px; }
+      .grid-2, .grid-3, .arch, .tile-diagram, .two-col-code { grid-template-columns: 1fr; }
+      .tile-diagram.five { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: 1fr; }
+      .flow .arrow { transform: rotate(90deg); }
+      .role-grid { grid-template-columns: 1fr; }
+      .footer { left: 24px; }
+      .slide-no { right: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="reveal"><div class="slides">
+    <section data-background-color="#0c1117">
+      <div class="eyebrow">hydro oj · record 6a79438463c4fc720cf27b6e</div>
+      <h1>读懂一次 TileLang GPU 提交</h1>
+      <p class="subtitle">从 <code class="accent">C = A B<sup>T</sup></code> 讲到 B200 上的 Tensor Core、TMA、TMEM 和 2-CTA cluster。代码不是黑魔法，只是把一块矩阵怎样搬家、相乘、写回说清楚。</p>
+      <div style="height:30px"></div>
+      <div class="grid-3">
+        <div class="panel"><div class="metric">58.79</div><div class="metric-label">记录总分（五个测试点）</div></div>
+        <div class="panel"><div class="metric">1.10–1.20×</div><div class="metric-label">相对 PyTorch baseline</div></div>
+        <div class="panel"><div class="metric">B200 · sm_100</div><div class="metric-label">计算能力 10.0</div></div>
+      </div>
+      <p class="micro" style="margin-top:28px">适合第一次接触 GPU kernel、TileLang 和矩阵乘的人。建议按空格翻页，按 S 打开演讲者视图。</p>
+      <div class="footer">single-page reveal.js slides · 2026-08-10</div><div class="slide-no">01</div>
+    </section>
+
+    <section>
+      <div class="eyebrow">01 · 先看这次提交到底做了什么</div>
+      <h2>输入、输出、评测边界</h2>
+      <div class="formula">A : (M,K)　 B : (N,K)　 C : (M,N)</div>
+      <div class="callout cyan">因为 B 的行向量要和 A 的行向量做点积，所以计算写成 <code>C[i,j] = Σ A[i,k] · B[j,k]</code>，也就是 <code>torch.matmul(A, B.T)</code>。</div>
+      <div class="grid-2" style="margin-top:20px">
+        <div class="panel">
+          <h3>提交接口</h3>
+          <pre><code class="language-python">def run_kernel(a, b, c, m, n, k):
+    # a, b: torch.bfloat16 CUDA tensor
+    # c:    需要被写满的输出
+    # m,n,k: Python int
+    ...</code></pre>
+          <p class="code-note">没有 <code>main</code>，没有显式同步。评测器负责创建输入、预热、交错计时和正确性检查。</p>
+        </div>
+        <div class="panel">
+          <h3>五个测试点的共同规律</h3>
+          <ul class="check-list">
+            <li>A、B 是只读输入，C 是独立输出副本</li>
+            <li>bf16 输入，累加器使用 float</li>
+            <li>每点 3 次 warmup，30 次 target/baseline 交错测速</li>
+            <li>所有点通过 PyTorch baseline 检查，误差阈值 rtol/atol 都是 1e-2</li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer">record code · problem id 3 · language tilelang</div><div class="slide-no">02</div>
+    </section>
+
+    <section class="tile-slide">
+      <div class="eyebrow">02 · 数学先落地</div>
+      <h2>把矩阵乘拆成 GPU 能搬动的小块</h2>
+      <div class="formula">C[i,j] = Σ<sub>k=0…K−1</sub> A[i,k] · B[j,k]</div>
+      <div class="tile-diagram five">
+        <div class="matrix a"><div class="matrix-title">A tile · 128 × 64</div><div class="cells"></div></div>
+        <div class="op">×</div>
+        <div class="matrix b"><div class="matrix-title">B tile · 128 × 64 · transpose_B</div><div class="cells"></div></div>
+        <div class="op">→</div>
+        <div class="matrix c"><div class="matrix-title">C tile · 128 × 128（float 累加）</div><div class="cells"></div></div>
+      </div>
+      <div class="grid-3" style="margin-top:22px">
+        <div class="panel tight"><span class="tag">BLOCK_M = 128</span><p>一次处理 C 的 128 行。</p></div>
+        <div class="panel tight"><span class="tag">BLOCK_K = 64</span><p>K 维分段，每段贡献一部分点积。</p></div>
+        <div class="panel tight"><span class="tag">block_n = 128 / 256</span><p>N 较大时改走 2-CTA 版本。</p></div>
+      </div>
+      <p class="micro">图中每个小格只是示意。真实 tile 是连续的 bf16 数组，Tensor Core 一次消化的是硬件规定的矩阵片段。</p>
+      <div class="footer">tile = 把大问题切成一块块固定形状的小问题</div><div class="slide-no">03</div>
+    </section>
+
+    <section>
+      <div class="eyebrow">03 · 萌新版 GPU 体系结构</div>
+      <h2>一条数据要经过哪些地方？</h2>
+      <div class="arch">
+        <div class="layer"><h3>全局显存 HBM</h3><p>A、B、C 最初都在这里。容量大，但每次访问延迟高。</p><div class="sm-grid"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><p class="micro">把整块矩阵反复从 HBM 读，会浪费带宽。</p></div>
+        <div class="layer"><h3>SM / shared memory</h3><p>一个线程块驻留在一个 SM。shared memory 是 CTA 内可协作的高速暂存。</p><div class="sm-grid"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><p class="micro">这里放 6 个 stage，下一段 K 可以提前搬。</p></div>
+        <div class="layer"><h3>Tensor Core / TMEM</h3><p>Tensor Core 做矩阵乘加。TMEM 是 Blackwell 上给 Tensor Core 用的片上累加空间。</p><div class="sm-grid"><i></i><i></i><i></i><i></i><i></i><i></i></div><p class="micro">输入 bf16，结果先积在 float。</p></div>
+      </div>
+      <div class="callout cyan">先记住一个朴素目标：<strong>让搬运和计算重叠</strong>，让 Tensor Core 少等数据。后面的 <code>T.tma_copy</code>、barrier、双缓冲都在服务这件事。</div>
+      <div class="footer">GPU 不是一块“更快的 CPU”，而是一群能并行工作的 SM</div><div class="slide-no">04</div>
+    </section>
+
+    <section>
+      <div class="eyebrow">04 · kernel 的三班人马</div>
+      <h2>同一个 256-thread CTA，按线程号分工</h2>
+      <div class="role-grid">
+        <div class="role"><b>线程 0–31 · loader</b><span>建立 PersistentTileScheduler。每个 K tile 用 TMA 把 A、B 搬进 shared memory，再告诉 loaded barrier “这一段到了”。</span></div>
+        <div class="role"><b>线程 32–63 · MMA 发起者</b><span>等待 loaded，沿 K 维循环调用 tcgen05_gemm。两个 TMEM 槽位轮流接收结果，ko==0 时清零累加器。</span></div>
+        <div class="role"><b>线程 128–255 · writer</b><span>等待 tmem_full，把 TMEM 结果拷到 fragment，再分成 64 列一段写回 C。线程 64–127 在这个版本里不参与主流程。</span></div>
+      </div>
+      <div class="panel" style="margin-top:20px">
+        <pre><code class="language-python">tx = T.get_thread_binding()
+if tx &lt; 32:             # load
+elif tx &lt; 64:           # tcgen05 MMA
+elif 128 &lt;= tx &lt; 256:  # store
+    ...</code></pre>
+        <p class="code-note">这里的分支不是三个独立 kernel，而是一个 kernel 内的角色分配。一个 warp 里的 32 个线程通常一起执行同一条指令。</p>
+      </div>
+      <div class="footer">线程分工写得很直白，代价是同步点也变多</div><div class="slide-no">05</div>
+    </section>
+
+    <section>
+      <div class="eyebrow">05 · TileLang 原语</div>
+      <h2>把 API 当成“GPU 词典”</h2>
+      <table class="small-table">
+        <thead><tr><th>代码</th><th>可以先这样理解</th><th>它解决的麻烦</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">@jit / @T.prim_func</td><td>先用 Python 写一个 shape 特化的 kernel 模板</td><td>把 M、N、K 带进编译期，生成 CUDA/TIR</td></tr>
+          <tr><td class="mono">T.Kernel(...)</td><td>启动一个持久化 CTA 网格</td><td>网格大小接近 SM 数，CTA 自己循环领 tile</td></tr>
+          <tr><td class="mono">T.alloc_shared</td><td>申请 shared memory 数组</td><td>缓存从 HBM 搬来的 A/B tile</td></tr>
+          <tr><td class="mono">T.tma_copy</td><td>异步张量搬运</td><td>搬运可在 Tensor Core 计算时继续进行</td></tr>
+          <tr><td class="mono">T.alloc_tmem</td><td>申请 Tensor Memory</td><td>给 tcgen05 MMA 放大块累加结果</td></tr>
+          <tr><td class="mono">T.tcgen05_gemm</td><td>调用 Blackwell Tensor Core 的矩阵乘加</td><td>把大量标量乘加换成硬件矩阵指令</td></tr>
+          <tr><td class="mono">T.mbarrier_*</td><td>带阶段号的生产者/消费者信号</td><td>保证“数据写完再读，结果读完再复用”</td></tr>
+        </tbody>
+      </table>
+      <p class="micro">TileLang 的好处在于：这些资源和同步关系在 Python/TIR 层表达，底层模板负责落到具体的 CUDA 指令。</p>
+      <div class="footer">API 名字长，但每个名字都对应一个硬件动作</div><div class="slide-no">06</div>
+    </section>
+
+    <section>
+      <div class="eyebrow">06 · 单 CTA 路径</div>
+      <h2>N = 128 时，为什么用另一套 kernel？</h2>
+      <div class="two-col-code">
+        <pre><code class="language-python">@jit
+def matmul_nt_persistent(m, n, k):
+    block_n = 128
+    ...
+    with T.Kernel(sm_num, threads=256):
+        a_shared = T.alloc_shared(
+            (6, 128, 64), "bfloat16")
+        b_shared = T.alloc_shared(
+            (6, 128, 64), "bfloat16")
+        ...
+        T.tcgen05_gemm(
+            a_shared[slot], b_shared[slot],
+            c_tmem, transpose_B=True,
+            mbar=consumed[slot],
+            clear_accum=ko == 0)</code></pre>
+        <div>
+          <div class="panel tight"><h3>case 5 的形状</h3><p class="metric" style="font-size:1.05em">M=113,408<br>N=128<br>K=5,120</p><p class="micro">N 恰好等于一个 128 列 tile。若硬套 2-CTA 路径，合作收益很小，反而多了 cluster 协议。</p></div>
+          <div class="callout" style="margin-top:14px">每个 CTA 负责一个 <code>128×128</code> 的 C tile；K 维有 <code>ceildiv(5120,64)=80</code> 段。Persistent scheduler 让一个 CTA 连续处理很多 M tile。</div>
+        </div>
+      </div>
+      <div class="footer">小 N 的工作形状，常常比“大矩阵通用模板”更值得单独调</div><div class="slide-no">07</div>
+    </section>
+
+    <section>
+      <div class="eyebrow">07 · 2-CTA cluster 路径</div>
+      <h2>N 较大时，让两个 CTA 一起做一块 256 列的工作</h2>
+      <div class="grid-2">
+        <pre><code class="language-python">with T.ClusterKernel(
+        sm_num, threads=256, cluster_dims=2):
+    cta_id = T.block_rank_in_cluster()
+    bx = scheduler.m_idx * 2 + cta_id
+    by = scheduler.n_idx
+    T.tma_copy(
+        b[(by * 2 + cta_id) * 128 :
+          (by * 2 + cta_id + 1) * 128,
+          ko * 64 : (ko + 1) * 64],
+        b_shared[phase], barrier=loaded[phase])
+
+    T.tcgen05_gemm(...,
+        transpose_B=True, use_2cta=True)</code></pre>
+        <div>
+          <div class="panel">
+            <h3>一块 256×256 的结果怎么来</h3>
+            <div class="flow" style="grid-template-columns:1fr 34px 1fr">
+              <div class="box"><b>CTA 0</b>A 的 128 行<br>B 的左半 128 列</div><div class="arrow">+</div><div class="box"><b>CTA 1</b>A 的另外 128 行<br>B 的右半 128 列</div>
+            </div>
+            <p class="micro">cluster barrier 让两个 CTA 能看到彼此约定好的阶段；MMA 指定 <code>use_2cta</code> 后由两 CTA 协同完成 Tensor Core 工作。</p>
+          </div>
+          <div class="callout cyan" style="margin-top:15px">写回阶段仍然按 <code>cta_id</code> 选自己的 128 行，避免两个 CTA 把同一片 C 互相覆盖。</div>
+        </div>
+      </div>
+      <div class="footer">cluster 是更大的协作单位，边界也更难写对</div><div class="slide-no">08</div>
+    </section>
+
+    <section>
+      <div class="eyebrow">08 · 双缓冲 + 多阶段流水线</div>
+      <h2>真正的计算流程：搬第 k+1 段时，算第 k 段</h2>
+      <div class="timeline">
+        <div class="phase"><b>阶段 0</b><span>TMA 把 A₀/B₀ 放进 shared[0]</span></div>
+        <div class="phase"><b>阶段 1</b><span>搬 A₁/B₁，同时 MMA 算 tile₀</span></div>
+        <div class="phase"><b>阶段 2</b><span>搬 A₂/B₂，同时 MMA 算 tile₁</span></div>
+        <div class="phase"><b>阶段 3</b><span>复用 stage 0 前先等 consumed</span></div>
+        <div class="phase"><b>阶段 4</b><span>结果进 TMEM 槽 0/1</span></div>
+        <div class="phase"><b>阶段 5</b><span>writer 取结果并写 C</span></div>
+      </div>
+      <div class="grid-2" style="margin-top:38px">
+        <div class="panel"><h3>三个 barrier 的方向</h3><ul class="check-list"><li><code>loaded</code>：shared tile 已经搬完，MMA 可以读</li><li><code>consumed</code>：MMA 不再读这个 stage，loader 可以覆盖</li><li><code>tmem_full / empty</code>：writer 与下一次 MMA 交换 TMEM 槽</li></ul></div>
+        <div class="panel"><h3>parity 是什么</h3><p>每个 barrier 有 0/1 两个阶段号。<code>phase // NUM_STAGES</code> 让循环绕回时仍能分辨“这一轮的到达”还是“上一轮的旧信号”。</p><div class="callout">没有 parity，stage 0 第二次被使用时，线程可能把上一轮的完成信号误当成这一轮的完成信号。</div></div>
+      </div>
+      <div class="footer">流水线的核心不是“多线程”，而是让不同阶段别互相干等</div><div class="slide-no">09</div>
+    </section>
+
+    <section>
+      <div class="eyebrow">09 · 关键同步代码</div>
+      <h2>读这几行：它们描述了数据的生命周期</h2>
+      <pre><code class="language-python">phase = scheduler.current_iter * k_blocks + ko
+
+T.mbarrier_wait_parity(
+    consumed[phase % NUM_STAGES],
+    ((phase // NUM_STAGES) &amp; 1) ^ 1)
+
+T.tma_copy(a_tile, a_shared[phase % NUM_STAGES],
+           barrier=loaded[phase % NUM_STAGES])
+T.tma_copy(b_tile, b_shared[phase % NUM_STAGES],
+           barrier=loaded[phase % NUM_STAGES])
+T.mbarrier_arrive(loaded[phase % NUM_STAGES])
+
+T.mbarrier_wait_parity(loaded[phase % NUM_STAGES],
+                        (phase // NUM_STAGES) &amp; 1)
+T.tcgen05_gemm(..., mbar=consumed[phase % NUM_STAGES])</code></pre>
+      <div class="grid-3" style="margin-top:18px">
+        <div class="panel tight"><h3>1. 等旧读者走开</h3><p><code>consumed</code> 防止 loader 覆盖 MMA 还没读完的 shared stage。</p></div>
+        <div class="panel tight"><h3>2. 发起异步搬运</h3><p><code>T.tma_copy</code> 写 shared，完成后到达 <code>loaded</code>。</p></div>
+        <div class="panel tight"><h3>3. MMA 消费</h3><p><code>mbar=consumed</code> 把“我读完了”反馈给 loader。</p></div>
+      </div>
+      <div class="footer">producer → buffer → consumer → buffer reuse</div><div class="slide-no">10</div>
+    </section>
+
+    <section class="compact-entry">
+      <div class="eyebrow">10 · 入口与 JIT 缓存</div>
+      <h2>提交真正被调用的地方只有十几行</h2>
+      <pre><code class="language-python">def run_kernel(a, b, c, m, n, k):
+    global compiled_shape, real_kernel
+    shape = (int(m), int(n), int(k))
+    if real_kernel is None:
+        compiled_shape = shape
+        builder = (matmul_nt_persistent
+                   if shape[1] == 128
+                   else matmul_nt_persistent_2cta)
+        real_kernel = builder(*shape)
+    elif shape != compiled_shape:
+        raise ValueError(
+            f"cached for {compiled_shape}, received {shape}")
+    real_kernel(a, b, c)</code></pre>
+      <div class="grid-2" style="margin-top:20px">
+        <div class="panel"><h3>为什么要缓存</h3><p>TileLang/JIT 编译会生成和 shape 绑定的 CUDA kernel。评测器把首次编译放在 warmup，所以计时只看后面的 kernel。</p></div>
+        <div class="panel"><h3>这份代码的隐含前提</h3><p>一个进程里只会跑同一个 shape。这里的全局缓存只有一个槽位；若以后改成同进程混跑多个 shape，需要用字典按 <code>(M,N,K)</code> 缓存。</p></div>
+      </div>
+      <div class="footer">shape specialization 换来更具体的 tile 和更少的运行时判断</div><div class="slide-no">11</div>
+    </section>
+
+    <section>
+      <div class="eyebrow">11 · 五个测试点</div>
+      <h2>为什么 case 5 的表现最不像前四个？</h2>
+      <table class="small-table">
+        <thead><tr><th>case</th><th>(M,N,K)</th><th>算力工作量</th><th>最低流量</th><th>算术强度</th><th>kernel / baseline</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">1</td><td class="mono">(6400,6400,1792)</td><td>146.8 GFLOP</td><td>127.8 MB</td><td>1149 FLOP/B</td><td class="green">0.101 / 0.120 ms</td></tr>
+          <tr><td class="mono">2</td><td class="mono">(20480,2048,3072)</td><td>257.7 GFLOP</td><td>222.3 MB</td><td>1159 FLOP/B</td><td class="green">0.168 / 0.184 ms</td></tr>
+          <tr><td class="mono">3</td><td class="mono">(1792,18176,2816)</td><td>183.4 GFLOP</td><td>177.6 MB</td><td>1033 FLOP/B</td><td class="green">0.122 / 0.133 ms</td></tr>
+          <tr><td class="mono">4</td><td class="mono">(9248,6176,1248)</td><td>142.6 GFLOP</td><td>152.7 MB</td><td>933 FLOP/B</td><td class="green">0.116 / 0.139 ms</td></tr>
+          <tr><td class="mono">5</td><td class="mono">(113408,128,5120)</td><td>148.6 GFLOP</td><td>1,191.6 MB</td><td class="orange">125 FLOP/B</td><td class="green">0.194 / 0.215 ms</td></tr>
+        </tbody>
+      </table>
+      <div class="callout" style="margin-top:18px">case 5 的 C 有 113,408×128 个元素，输出本身就要写约 29 MB，输入 A 也很大。算术强度只有前几项的约十分之一，所以它更容易受显存带宽、TMA 和写回路径影响。</div>
+      <div class="footer">算术强度 = FLOPs / 最低显存字节数，只是 roofline 的第一眼判断</div><div class="slide-no">12</div>
+    </section>
+
+    <section>
+      <div class="eyebrow">12 · 实测结果</div>
+      <h2>速度不错，但 profiler 解释了“为什么还没满”</h2>
+      <div class="grid-2">
+        <div class="panel">
+          <h3>Hydro 计时</h3>
+          <div class="bars">
+            <div class="bar-row"><span>case 1</span><div class="bar"><i style="width:65.05%"></i></div><em>65.1%</em></div>
+            <div class="bar-row"><span>case 2</span><div class="bar"><i style="width:68.81%"></i></div><em>68.8%</em></div>
+            <div class="bar-row"><span>case 3</span><div class="bar"><i style="width:67.51%"></i></div><em>67.5%</em></div>
+            <div class="bar-row"><span>case 4</span><div class="bar"><i style="width:55.19%"></i></div><em>55.2%</em></div>
+            <div class="bar-row"><span>case 5</span><div class="bar"><i style="width:80.15%"></i></div><em>80.1%</em></div>
+          </div>
+          <p class="micro">条形长度是记录里的 roofline efficiency，不是“占用率”。case 5 因为更偏带宽，反而更接近它的理论下限。</p>
+        </div>
+        <div class="panel">
+          <h3>NCU 看到的共同信号</h3>
+          <ul class="warn-list">
+            <li>理论/实际 occupancy 约 12.5%，每个 scheduler 平均只有 2 个可发射 warp</li>
+            <li>TC pipeline 在不同 case 大约 68–83%，说明 Tensor Core 确实在工作</li>
+            <li>同步等待和 L1TEX scoreboard stall 明显，loader、MMA、writer 之间有空档</li>
+            <li>部分 case 出现 register spill / local memory 访问，fragment 太大是嫌疑点</li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer">1.10× baseline 已经有收益；NCU 提供的是下一轮优化线索，不是成绩单</div><div class="slide-no">13</div>
+    </section>
+
+    <section>
+      <div class="eyebrow">13 · 读 profiler 要有边界</div>
+      <h2>哪些数字可信，哪些数字只能当线索？</h2>
+      <div class="grid-2">
+        <div class="panel"><h3 class="green">可以直接用来讲结果</h3><ul class="check-list"><li>GPU 型号、计算能力、grid=[148,1,1]、block=[256,1,1]</li><li>kernel time、baseline time、speedup、roofline efficiency</li><li>所有 5 个 case 的 correctness check passed</li><li>TC pipeline 利用率与 occupancy 的量级</li></ul></div>
+        <div class="panel"><h3 class="orange">需要谨慎解释</h3><ul class="warn-list"><li>NCU 报告提示无法访问 6 个 CTC metrics，不能假装有完整 cluster 传输数据</li><li>source import 失败，报告里的源码行号落在生成的 <code>tvm_kernels.cu</code>，不等同于原 Python 行号</li><li>NCU 自动规则给出的“可提升 24×/57×”是启发式估计，不能当成实际承诺</li><li>case 4 还有 raw metric instance 被限制到 100000 的警告</li></ul></div>
+      </div>
+      <p class="quote" style="margin-top:26px">最稳妥的说法是：这份 kernel 已经把 Tensor Core 跑起来了，但 occupancy 低、同步和局部内存访问仍在吃时间。下一步应该看生成的 SASS、shared bank conflict 和 fragment 的寄存器压力，而不是只盯着一个百分比。</p>
+      <div class="footer">profiler 是诊断工具，先区分测量值、推断值和自动建议</div><div class="slide-no">14</div>
+    </section>
+
+    <section class="compact-cards">
+      <div class="eyebrow">14 · 代码里值得肯定的地方</div>
+      <h2>这份提交为什么能稳定过五个点？</h2>
+      <div class="grid-3">
+        <div class="panel"><h3>形状分流</h3><p><code>N=128</code> 走单 CTA，其余走 2-CTA。它没有逼所有形状共用一套不合身的 tile。</p></div>
+        <div class="panel"><h3>片上复用</h3><p>A/B 先进入 6-stage shared，K 维循环中反复复用，Tensor Core 读的是片上数据。</p></div>
+        <div class="panel"><h3>异步协作</h3><p>TMA、mbarrier、TMEM 双槽位把加载、MMA、写回串成一条可重叠的流水线。</p></div>
+        <div class="panel"><h3>数值选择</h3><p>输入保持 bf16，累加器是 float，最后再写回 bf16，误差能落在评测容差内。</p></div>
+        <div class="panel"><h3>持久化调度</h3><p>grid 只开到 SM 数附近，CTA 用 scheduler 循环领取 tile，减少超大网格的调度成本。</p></div>
+        <div class="panel"><h3>评测纪律</h3><p>没有在提交里调用 <code>cudaDeviceSynchronize()</code>，也没有把主要工作丢到计时器看不到的 stream。</p></div>
+      </div>
+      <div class="callout cyan" style="margin-top:22px">从工程角度看，正确性边界、shape 专用化和硬件路径都写得比较清楚。这是“能调优”的 kernel，而不是只靠一个巧合跑快。</div>
+      <div class="footer">成绩背后是几条很具体的工程取舍</div><div class="slide-no">15</div>
+    </section>
+
+    <section>
+      <div class="eyebrow">15 · 下一轮可以怎么改</div>
+      <h2>先修容易确认的，再碰硬件细节</h2>
+      <div class="grid-2">
+        <div class="panel"><h3 class="orange">代码层面</h3><ul class="warn-list"><li>2-CTA writer 里 <code>T.copy(c_shared, c[...])</code> 出现两次，第二次写入结果相同，应该先确认是否是笔误</li><li><code>real_kernel / compiled_shape</code> 只有单槽缓存；多 shape 同进程时改成字典</li><li>TileLang 警告 scheduler 被重新绑定；按提示用可变变量表达，减少编译器噪声</li><li>边界尺寸不是 128/256 的倍数时，确认 TMA 和写回是否有越界保护或 padding 约定</li></ul></div>
+        <div class="panel"><h3 class="cyan">性能层面</h3><ul class="check-list"><li>用更小的 fragment 或分块写回，减少 register spill 和 local memory</li><li>看 shared bank conflict 的具体访问布局，必要时做 padding / swizzle</li><li>把 loader 与 writer 的 warp 数做小实验，观察 barrier stall 是否下降</li><li>对 case 5 单独调 TMA tile、写回宽度和 CTA 数，不要用前四点的直觉替代测量</li></ul></div>
+      </div>
+      <div class="callout red" style="margin-top:20px">不要先把 occupancy 当成唯一目标。这个 kernel 的 TC 利用率已经不低；如果为了多塞几个 warp 而破坏 shared/TMEM 流水线，时间可能反而变长。</div>
+      <div class="footer">优化顺序：先消除确定的冗余，再用 profiler 验证假设</div><div class="slide-no">16</div>
+    </section>
+
+    <section>
+      <div class="eyebrow">16 · 一张图复盘整个 kernel</div>
+      <h2>从 Python 入口到 C 的最后一次写入</h2>
+      <div class="flow">
+        <div class="box"><b>run_kernel</b>读 shape<br>选择 builder<br>缓存 JIT callable</div><div class="arrow">→</div>
+        <div class="box"><b>scheduler</b>领取 (bx, by)<br>持久化 CTA 循环</div><div class="arrow">→</div>
+        <div class="box"><b>TMA + shared</b>按 K=64<br>搬 6 个 stage</div><div class="arrow">→</div>
+        <div class="box"><b>tcgen05</b>bf16 输入<br>float 累加到 TMEM</div><div class="arrow">→</div>
+        <div class="box"><b>fragment + C</b>按 64 列切片<br>写回 bf16 输出</div>
+      </div>
+      <div class="grid-2" style="margin-top:30px">
+        <div class="panel"><h3>一句话解释</h3><p class="quote">它用持久化 CTA 领取矩阵 tile，用 TMA 把 K 分段搬到 shared，再用 Blackwell Tensor Core 做 bf16×bf16→float 的累加，最后分片写回 C。</p></div>
+        <div class="panel"><h3>看代码的顺序</h3><p>先读 <code>run_kernel</code> 了解分流，再读 tile 尺寸和内存申请，最后读三个线程角色与 barrier。直接从第一行读到最后一行，反而容易在同步细节里迷路。</p></div>
+      </div>
+      <div class="footer">先画数据流，再回到 API，代码会突然短很多</div><div class="slide-no">17</div>
+    </section>
+
+    <section>
+      <div class="eyebrow">17 · 结尾</div>
+      <h1>把 GPU kernel 看成一条有节拍的装配线</h1>
+      <p class="subtitle">数学决定要算什么。tile 决定每次搬多少。shared/TMEM 决定数据放哪。barrier 决定谁能先走。profiler 告诉你，哪一段还在等。</p>
+      <div style="height:22px"></div>
+      <div class="grid-3">
+        <div class="panel"><div class="metric accent">128×64</div><div class="metric-label">K 方向的基本搬运块</div></div>
+        <div class="panel"><div class="metric orange">6 stages</div><div class="metric-label">shared memory 的循环缓冲</div></div>
+        <div class="panel"><div class="metric green">5 / 5</div><div class="metric-label">测试点通过正确性检查</div></div>
+      </div>
+      <p class="micro" style="margin-top:32px">对应提交：<code>6a79438463c4fc720cf27b6e</code> · 代码来源：Hydro 本地 record · 性能数据：该记录的 B200/Nsight Compute profile</p>
+      <div class="footer">end · 回到代码，找出下一处等待</div><div class="slide-no">18</div>
+    </section>
+  </div></div>
+  <script src="https://cdn.jsdelivr.net/npm/reveal.js@6.0.1/dist/reveal.js"></script>
+  <script>
+    document.querySelectorAll('.cells').forEach((el) => { el.innerHTML = '<i></i>'.repeat(64); });
+    const narrow = window.innerWidth < 800;
+    const deck = new Reveal({
+      hash: true,
+      slideNumber: false,
+      controls: true,
+      progress: true,
+      center: false,
+      width: narrow ? 390 : 1280,
+      height: narrow ? 900 : 720,
+      margin: 0.04,
+      transition: 'slide',
+      backgroundTransition: 'none'
+    });
+    deck.initialize();
+  </script>
+</body>
+</html>

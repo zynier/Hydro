@@ -209,20 +209,37 @@ async function tryLock(uuid: string): Promise<(() => Promise<void>) | null> {
     }
 }
 
-function peakTFLOPSForDtype(fp32TFLOPS: number, dtype: string) {
-    if (['fp16', 'float16', 'half', 'bf16', 'bfloat16'].includes(dtype.toLowerCase())) return fp32TFLOPS * 2;
-    if (['fp64', 'float64', 'double'].includes(dtype.toLowerCase())) return fp32TFLOPS / 2;
-    return fp32TFLOPS;
+function denseTensorCoreRatio(computeCapability?: string) {
+    const [major, minor] = (computeCapability || '').split('.').map(Number);
+    if (major >= 10) return 30;
+    if (major === 9) return 15;
+    if (major === 8 && minor === 0) return 16;
+    if (major === 8 && minor === 6) return 4;
+    if (major === 8 && minor === 9) return 2;
+    if (major === 7) return 8;
+    return 2;
+}
+
+function peakTFLOPSForDtype(
+    hardware: Pick<GPUHardware, 'fp32TFLOPS'> & Partial<Pick<GPUHardware, 'computeCapability'>>,
+    dtype: string,
+) {
+    if (['fp16', 'float16', 'half', 'bf16', 'bfloat16'].includes(dtype.toLowerCase())) {
+        return hardware.fp32TFLOPS * denseTensorCoreRatio(hardware.computeCapability);
+    }
+    if (['fp64', 'float64', 'double'].includes(dtype.toLowerCase())) return hardware.fp32TFLOPS / 2;
+    return hardware.fp32TFLOPS;
 }
 
 export function theoreticalLowerBoundMs(
     flops: number,
     memoryBytes: number,
-    hardware: Pick<GPUHardware, 'bandwidthGBps' | 'fp32TFLOPS'>,
+    hardware: Pick<GPUHardware, 'bandwidthGBps' | 'fp32TFLOPS'>
+        & Partial<Pick<GPUHardware, 'computeCapability'>>,
     dtype = 'fp32',
 ) {
     if (!(hardware.bandwidthGBps > 0) || !(hardware.fp32TFLOPS > 0)) return 0;
-    const computeSeconds = flops / (peakTFLOPSForDtype(hardware.fp32TFLOPS, dtype) * 1e12);
+    const computeSeconds = flops / (peakTFLOPSForDtype(hardware, dtype) * 1e12);
     const memorySeconds = memoryBytes / (hardware.bandwidthGBps * 1e9);
     return Math.max(computeSeconds, memorySeconds) * 1000;
 }

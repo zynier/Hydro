@@ -20,6 +20,14 @@ describe('GPU operator judge', () => {
         expect(theoreticalLowerBoundMs(100e9, 1e9, hardware, 'fp16')).to.equal(5);
     });
 
+    it('uses the dense Blackwell Tensor Core peak for BF16', () => {
+        const hardware = { bandwidthGBps: 7672.32, fp32TFLOPS: 74.45, computeCapability: '10.0' };
+        expect(theoreticalLowerBoundMs(146800640000, 127795200, hardware, 'bf16'))
+            .to.be.closeTo(0.06572672487127826, 1e-12);
+        expect(theoreticalLowerBoundMs(148646133760, 1191641088, hardware, 'bf16'))
+            .to.be.closeTo(0.15531691691691693, 1e-12);
+    });
+
     it('groups identical GPU models', () => {
         const pool = new GPUResourcePool();
         pool.devices = [0, 1].map((index) => ({

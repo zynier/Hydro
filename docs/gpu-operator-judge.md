@@ -174,7 +174,7 @@ raw = 100 / (1 + (T_k - T_h) / (T_b - T_h))
 
 Matching PyTorch is 50 points and matching the hardware estimate is 100 points. Raw scores above 100 are displayed with logarithmic compression (`100 + 10 * log2(raw / 100)`) and capped at 150. The submission score is the arithmetic mean of all case scores, including zeros for failed cases; total time is the sum of all `T_k` values.
 
-The CUDA runtime probe derives memory bandwidth and FP32 throughput from device properties. FP16/BF16 work uses twice the probed FP32 rate, so the roofline is a stable comparison anchor rather than a promise of achievable tensor-core performance.
+The CUDA runtime probe derives memory bandwidth and FP32 throughput from device properties. For FP16/BF16 workloads, the device compute capability selects an architecture-specific dense Tensor Core rate relative to the probed FP32 rate. Sparse Tensor Core throughput is not used. If the compute capability is unavailable or unknown, Hydro falls back to twice the FP32 rate.
 
 ## Nsight Compute profiles
 
