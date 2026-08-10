@@ -132,3 +132,89 @@ export function registerGPUTopPRenormExample(ctx: Context) {
         },
     );
 }
+
+export function registerGPUTopKRenormExample(ctx: Context) {
+    return ctx.addScript(
+        'gpuTopKRenormExample',
+        'Install the XPUOJ problem 4 compatible Top-k renormalization GPU operator problem.',
+        Schema.object({
+            domainId: Schema.string().default('system'),
+            pid: Schema.string().default('GPU4'),
+            owner: Schema.number().default(1).min(1).step(1),
+            force: Schema.boolean().default(false),
+        }),
+        async ({ domainId, pid, owner, force }, report) => {
+            const root = path.resolve(__dirname, '../../../examples/gpu-top-k-renorm');
+            const [content, config, testcase] = await Promise.all([
+                fs.readFile(path.join(root, 'problem.md'), 'utf8'),
+                fs.readFile(path.join(root, 'config.yaml')),
+                fs.readFile(path.join(root, 'testcase_config.py')),
+            ]);
+            let pdoc = await ProblemModel.get(domainId, pid);
+            if (pdoc && !force) throw new Error(`Problem ${domainId}/${pid} already exists. Pass force=true to update it.`);
+            if (pdoc) {
+                pdoc = await ProblemModel.edit(domainId, pdoc.docId, {
+                    title: 'Top k Renorm Probs',
+                    content,
+                    tag: ['GPU', 'CUDA', 'TileLang', 'TIRx', 'Triton'],
+                    html: false,
+                });
+            } else {
+                const docId = await ProblemModel.add(
+                    domainId, pid, 'Top k Renorm Probs', content, owner,
+                    ['GPU', 'CUDA', 'TileLang', 'TIRx', 'Triton'],
+                );
+                pdoc = await ProblemModel.get(domainId, docId);
+            }
+            await Promise.all([
+                ProblemModel.addTestdata(domainId, pdoc.docId, 'config.yaml', config, owner),
+                ProblemModel.addTestdata(domainId, pdoc.docId, 'testcase_config.py', testcase, owner),
+            ]);
+            report({ message: `Installed ${domainId}/${pid} (numeric id ${pdoc.docId}).` });
+            return true;
+        },
+    );
+}
+
+export function registerGPUTransposeExample(ctx: Context) {
+    return ctx.addScript(
+        'gpuTransposeExample',
+        'Install the XPUOJ problem 100 compatible fp32 transpose GPU operator problem.',
+        Schema.object({
+            domainId: Schema.string().default('system'),
+            pid: Schema.string().default('GPU5'),
+            owner: Schema.number().default(1).min(1).step(1),
+            force: Schema.boolean().default(false),
+        }),
+        async ({ domainId, pid, owner, force }, report) => {
+            const root = path.resolve(__dirname, '../../../examples/gpu-transpose-fp32');
+            const [content, config, testcase] = await Promise.all([
+                fs.readFile(path.join(root, 'problem.md'), 'utf8'),
+                fs.readFile(path.join(root, 'config.yaml')),
+                fs.readFile(path.join(root, 'testcase_config.py')),
+            ]);
+            let pdoc = await ProblemModel.get(domainId, pid);
+            if (pdoc && !force) throw new Error(`Problem ${domainId}/${pid} already exists. Pass force=true to update it.`);
+            if (pdoc) {
+                pdoc = await ProblemModel.edit(domainId, pdoc.docId, {
+                    title: 'Transpose (fp32)',
+                    content,
+                    tag: ['GPU', 'CUDA', 'TileLang', 'TIRx', 'Triton'],
+                    html: false,
+                });
+            } else {
+                const docId = await ProblemModel.add(
+                    domainId, pid, 'Transpose (fp32)', content, owner,
+                    ['GPU', 'CUDA', 'TileLang', 'TIRx', 'Triton'],
+                );
+                pdoc = await ProblemModel.get(domainId, docId);
+            }
+            await Promise.all([
+                ProblemModel.addTestdata(domainId, pdoc.docId, 'config.yaml', config, owner),
+                ProblemModel.addTestdata(domainId, pdoc.docId, 'testcase_config.py', testcase, owner),
+            ]);
+            report({ message: `Installed ${domainId}/${pid} (numeric id ${pdoc.docId}).` });
+            return true;
+        },
+    );
+}
