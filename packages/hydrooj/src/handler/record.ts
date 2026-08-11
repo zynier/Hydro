@@ -4,7 +4,7 @@ import {
 import { Filter, ObjectId } from 'mongodb';
 import {
     ContestNotFoundError, HackRejudgeFailedError,
-    NotFoundError, PermissionError, PretestRejudgeFailedError, ProblemConfigError,
+    NotFoundError, PretestRejudgeFailedError, ProblemConfigError,
     ProblemNotFoundError, RecordNotFoundError, UserNotFoundError,
 } from '../error';
 import { RecordDoc, Tdoc } from '../interface';
@@ -18,10 +18,9 @@ import system from '../model/system';
 import TaskModel from '../model/task';
 import user from '../model/user';
 import {
-    ConnectionHandler, param, subscribe, Types,
+    ConnectionHandler, Handler, param, subscribe, Types,
 } from '../service/server';
 import { buildProjection, streamToBuffer, Time } from '../utils';
-import { ContestDetailBaseHandler } from './contest';
 import { postJudge } from './judge';
 
 type GPUProfileView = 'overview' | 'section' | 'rules' | 'metrics' | 'metric' | 'source' | 'code';
@@ -34,6 +33,12 @@ const GPU_PROFILE_PAGE_SIZE = {
     source: 400,
 };
 const GPU_PROFILE_TEXT_PAGE_CHARS = 128 * 1024;
+
+function projectPublicRecordCode(rdoc: RecordDoc): RecordDoc {
+    const projected = pick(rdoc, ['_id', 'domainId', 'uid', 'pid', 'lang', 'code', 'files']) as RecordDoc;
+    projected.files &&= pick(projected.files, ['code']);
+    return projected;
+}
 
 function profileArray(value: any): any[] {
     return Array.isArray(value) ? value : [];
@@ -152,7 +157,9 @@ function profileSourceLabel(path: string, position: number) {
     return path.split('/').filter(Boolean).slice(-2).join('/');
 }
 
-export class RecordListHandler extends ContestDetailBaseHandler {
+export class RecordListHandler extends Handler {
+    tdoc?: Tdoc;
+
     @param('page', Types.PositiveInt, true)
     @param('pid', Types.ProblemId, true)
     @param('tid', Types.ObjectId, true)
@@ -181,15 +188,10 @@ export class RecordListHandler extends ContestDetailBaseHandler {
             if (udoc) q.uid = udoc._id;
             else invalid = true;
         }
-        if (q.uid !== this.user._id) this.checkPerm(PERM.PERM_VIEW_RECORD);
         if (tid) {
             tdoc = await contest.get(domainId, tid);
             this.tdoc = tdoc;
             if (!tdoc) throw new ContestNotFoundError(domainId, pid);
-            if (!contest.canShowScoreboard.call(this, tdoc, true)) throw new PermissionError(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
-            if (!contest[q.uid === this.user._id ? 'canShowSelfRecord' : 'canShowRecord'].call(this, tdoc, true)) {
-                throw new PermissionError(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
-            }
             if (!(await contest.getStatus(domainId, tid, this.user._id))?.attend) {
                 const name = tdoc.rule === 'homework'
                     ? "You haven't claimed this homework yet."
@@ -257,18 +259,21 @@ export class RecordListHandler extends ContestDetailBaseHandler {
     }
 }
 
-export class RecordDetailHandler extends ContestDetailBaseHandler {
+export class RecordDetailHandler extends Handler {
     rdoc: RecordDoc;
+    tdoc?: Tdoc;
 
     @param('rid', Types.ObjectId)
     async prepare(domainId: string, rid: ObjectId) {
         this.rdoc = await record.get(domainId, rid);
         if (!this.rdoc) throw new RecordNotFoundError(rid);
-        if (this.rdoc.uid !== this.user._id) this.checkPerm(PERM.PERM_VIEW_RECORD);
     }
 
     async download() {
-        for (const file of ['code', 'hack']) {
+        const canDownloadHack = this.rdoc.uid === this.user._id
+            || this.user.hasPriv(PRIV.PRIV_READ_RECORD_CODE)
+            || this.user.hasPerm(PERM.PERM_READ_RECORD_CODE);
+        for (const file of ['code', ...canDownloadHack ? ['hack'] : []]) {
             if (!this.rdoc.files?.[file]) continue;
             const [id, filename] = this.rdoc.files?.[file]?.split('#') || [];
             // eslint-disable-next-line no-await-in-loop
@@ -294,13 +299,12 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
         }
         let canViewDetail = true;
         if (rdoc.contest?.toString().startsWith('0'.repeat(23))) {
-            if (rdoc.uid !== this.user._id) throw new PermissionError(PERM.PERM_READ_RECORD_CODE);
+            canViewDetail = rdoc.uid === this.user._id;
         } else if (rdoc.contest) {
             this.tdoc = await contest.get(domainId, rdoc.contest);
             let canView = this.user.own(this.tdoc);
             canView ||= contest.canShowRecord.call(this, this.tdoc);
             canView ||= contest.canShowSelfRecord.call(this, this.tdoc, true) && rdoc.uid === this.user._id;
-            if (!canView && rdoc.uid !== this.user._id) throw new PermissionError(rid);
             canViewDetail = canView;
             this.args.tid = this.tdoc.docId;
             if (!this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
@@ -309,33 +313,24 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             }
         }
 
-        // eslint-disable-next-line prefer-const
-        let [pdoc, self, udoc] = await Promise.all([
+        let [pdoc, udoc] = await Promise.all([
             problem.get(rdoc.domainId, rdoc.pid, problem.PROJECTION_LIST.concat('config')),
-            problem.getStatus(domainId, rdoc.pid, this.user._id),
             user.getById(domainId, rdoc.uid),
         ]);
 
-        let canViewCode = rdoc.uid === this.user._id;
-        canViewCode ||= this.user.hasPriv(PRIV.PRIV_READ_RECORD_CODE);
-        canViewCode ||= this.user.hasPerm(PERM.PERM_READ_RECORD_CODE);
-        canViewCode ||= this.user.hasPerm(PERM.PERM_READ_RECORD_CODE_ACCEPT) && self?.status === STATUS.STATUS_ACCEPTED;
-        if (this.tdoc) {
-            this.tsdoc = await contest.getStatus(domainId, this.tdoc.docId, this.user._id);
-            canViewCode ||= this.user.own(this.tdoc);
-            if (this.tdoc.allowViewCode && contest.isDone(this.tdoc)) {
-                canViewCode ||= !!this.tsdoc?.attend;
-            }
-            if (!this.tsdoc?.attend && pdoc && !problem.canViewBy(pdoc, this.user)) throw new PermissionError(PERM.PERM_VIEW_PROBLEM_HIDDEN);
-        } else if (pdoc && !problem.canViewBy(pdoc, this.user)) throw new PermissionError(PERM.PERM_VIEW_PROBLEM_HIDDEN);
-        if (!canViewCode) {
-            rdoc.code = '';
-            rdoc.files = {};
-            rdoc.compilerTexts = [];
-        } else if (download) return await this.download();
+        if (pdoc && !problem.canViewBy(pdoc, this.user)) {
+            canViewDetail = false;
+            pdoc = null;
+        }
+        if (download) return await this.download();
         this.response.template = 'record_detail.html';
         this.response.body = {
-            udoc, rdoc: canViewDetail ? rdoc : pick(rdoc, ['_id', 'lang', 'code']), pdoc, tdoc: this.tdoc, rev, allRevs,
+            udoc,
+            rdoc: canViewDetail ? rdoc : projectPublicRecordCode(rdoc),
+            pdoc,
+            tdoc: canViewDetail ? this.tdoc : null,
+            rev,
+            allRevs,
         };
     }
 
@@ -673,8 +668,7 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
         if (tid) {
             this.tdoc = await contest.get(domainId, tid);
             if (!this.tdoc) throw new ContestNotFoundError(domainId, tid);
-            if (pretest || contest.canShowScoreboard.call(this, this.tdoc, true)) this.tid = tid.toHexString();
-            else throw new PermissionError(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
+            this.tid = tid.toHexString();
             if (!this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
                 this.applyProjection = true;
             }
@@ -691,7 +685,6 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
                 else throw new UserNotFoundError(uidOrName);
             }
         }
-        if (this.uid !== this.user._id) this.checkPerm(PERM.PERM_VIEW_RECORD);
         if (pid) {
             const pdoc = await problem.get(domainId, pid);
             if (pdoc) this.pid = pdoc.docId;
@@ -727,10 +720,6 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
             if (!this.all) {
                 if (!rdoc.contest && this.tid) return;
                 if (rdoc.contest && ![this.tid, '000000000000000000000000'].includes(rdoc.contest.toString())) return;
-                if (this.tid && rdoc.contest?.toString() !== '0'.repeat(24)) {
-                    if (rdoc.uid !== this.user._id && !contest.canShowRecord.call(this, this.tdoc, true)) return;
-                    if (rdoc.uid === this.user._id && !contest.canShowSelfRecord.call(this, this.tdoc, true)) return;
-                }
             }
         }
         if (typeof this.pid === 'number' && rdoc.pid !== this.pid) return;
@@ -778,7 +767,7 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
     throttleSend: any;
     applyProjection = false;
     noTemplate = false;
-    canViewCode = false;
+    canViewDetail = true;
 
     @param('rid', Types.ObjectId)
     @param('noTemplate', Types.Boolean, true)
@@ -790,23 +779,17 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
             let canView = this.user.own(this.tdoc);
             canView ||= contest.canShowRecord.call(this, this.tdoc);
             canView ||= this.user._id === rdoc.uid && contest.canShowSelfRecord.call(this, this.tdoc);
-            if (!canView) throw new PermissionError(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
+            this.canViewDetail = canView;
             if (!this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
                 this.applyProjection = true;
             }
+        } else if (rdoc.contest && rdoc.uid !== this.user._id) {
+            this.canViewDetail = false;
         }
-        const [pdoc, self] = await Promise.all([
-            problem.get(rdoc.domainId, rdoc.pid),
-            problem.getStatus(domainId, rdoc.pid, this.user._id),
-        ]);
-
-        this.canViewCode = rdoc.uid === this.user._id;
-        this.canViewCode ||= this.user.hasPriv(PRIV.PRIV_READ_RECORD_CODE);
-        this.canViewCode ||= this.user.hasPerm(PERM.PERM_READ_RECORD_CODE);
-        this.canViewCode ||= this.user.hasPerm(PERM.PERM_READ_RECORD_CODE_ACCEPT) && self?.status === STATUS.STATUS_ACCEPTED;
-
-        if (!rdoc.contest || this.user._id !== rdoc.uid) {
-            if (!problem.canViewBy(pdoc, this.user)) throw new PermissionError(PERM.PERM_VIEW_PROBLEM_HIDDEN);
+        let pdoc = await problem.get(rdoc.domainId, rdoc.pid);
+        if (pdoc && !problem.canViewBy(pdoc, this.user)) {
+            this.canViewDetail = false;
+            pdoc = problem.default;
         }
 
         this.pdoc = pdoc;
@@ -839,13 +822,7 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
         if (this.applyProjection) rdoc = contest.applyProjection(this.tdoc, rdoc, this.user);
         // TODO: frontend doesn't support incremental update
         // if ($set) this.send({ $set, $push });
-        if (!this.canViewCode) {
-            rdoc = {
-                ...rdoc,
-                code: '',
-                compilerTexts: [],
-            };
-        }
+        if (!this.canViewDetail) rdoc = projectPublicRecordCode(rdoc);
         if (![STATUS.STATUS_WAITING, STATUS.STATUS_JUDGING, STATUS.STATUS_COMPILING, STATUS.STATUS_FETCHED].includes(rdoc.status)) {
             this.disconnectTimeout = setTimeout(() => this.close(4001, 'Ended'), 30000);
         }

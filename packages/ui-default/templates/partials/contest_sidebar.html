@@ -101,23 +101,17 @@
         <span class="icon icon-settings"></span> {{ _('Contest Management') }}
       </a></li>
     {% endif %}
-    {% if handler.user.own(tdoc) or handler.user.hasPriv(PRIV.PRIV_READ_RECORD_CODE) or handler.user.hasPerm(perm.PERM_READ_RECORD_CODE) %}
-      {% if model.contest.canShowRecord.call(handler, tdoc, true) %}
-        <li class="menu__item"><a class="menu__link" href="{{ url('contest_code', tid=tdoc.docId) }}" data-no-instant>
-          <span class="icon icon-download"></span> {{ _('Export All Code') }}
-        </a></li>
-      {% endif %}
-    {% endif %}
+    <li class="menu__item"><a class="menu__link" href="{{ url('contest_code', tid=tdoc.docId, query={all:true}) }}" data-no-instant>
+      <span class="icon icon-download"></span> {{ _('Export All Code') }}
+    </a></li>
     {% if handler.user.hasPerm(perm.PERM_VIEW_DISCUSSION) %}
       <li class="menu__item"><a class="menu__link" href="{{ url('discussion_node', type='contest', name=tdoc.docId) }}">
         <span class="icon icon-comment--text"></span> {{ _('Discussion') }}
       </a></li>
     {% endif %}
-    {% if handler.user.own(tdoc) or handler.user.hasPriv(PRIV.PRIV_READ_RECORD_CODE) or handler.user.hasPerm(perm.PERM_READ_RECORD_CODE) %}
-      <li class="menu__item"><a class="menu__link" href="{{ url('record_main', query={tid:tdoc.docId}) }}">
-        <span class="icon icon-flag"></span> {{ _('All Submissions') }}
-      </a></li>
-    {% endif %}
+    <li class="menu__item"><a class="menu__link" href="{{ url('record_main', query={tid:tdoc.docId}) }}">
+      <span class="icon icon-flag"></span> {{ _('All Submissions') }}
+    </a></li>
     {% if tsdoc.attend and model.contest.canShowSelfRecord.call(handler, tdoc) %}
       <li class="menu__item"><a class="menu__link" href="{{ url('record_main', query={tid:tdoc.docId, uidOrName:handler.user._id}) }}">
         <span class="icon icon-flag"></span> {{ _('My Submissions') }}

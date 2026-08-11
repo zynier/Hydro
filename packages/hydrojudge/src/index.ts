@@ -6,7 +6,9 @@ import {
 import { JudgeSettings, overrideConfig } from './config';
 import {
     registerGPUDenseGemmExample,
+    registerGPUEinsumOuterExample,
     registerGPUExample,
+    registerGPUFFTExample,
     registerGPUTopKRenormExample,
     registerGPUTopPRenormExample,
     registerGPUTransposeExample,
@@ -88,6 +90,8 @@ export async function apply(ctx: Context, config: ReturnType<typeof Config>) {
     registerGPUTopPRenormExample(ctx);
     registerGPUTopKRenormExample(ctx);
     registerGPUTransposeExample(ctx);
+    registerGPUFFTExample(ctx);
+    registerGPUEinsumOuterExample(ctx);
     if (process.env.NODE_APP_INSTANCE !== '0') return;
     // eslint-disable-next-line consistent-return
     if (!config.disable) return require('./hosts/builtin').apply(ctx);

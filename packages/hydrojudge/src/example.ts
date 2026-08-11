@@ -218,3 +218,88 @@ export function registerGPUTransposeExample(ctx: Context) {
         },
     );
 }
+
+export function registerGPUFFTExample(ctx: Context) {
+    return ctx.addScript(
+        'gpuFFTExample',
+        'Install the XPUOJ problem 96 compatible fp32 batched FFT GPU operator problem.',
+        Schema.object({
+            domainId: Schema.string().default('system'),
+            pid: Schema.string().default('GPU6'),
+            owner: Schema.number().default(1).min(1).step(1),
+            force: Schema.boolean().default(false),
+        }),
+        async ({ domainId, pid, owner, force }, report) => {
+            const root = path.resolve(__dirname, '../../../examples/gpu-fft-fp32');
+            const [content, config, testcase] = await Promise.all([
+                fs.readFile(path.join(root, 'problem.md'), 'utf8'),
+                fs.readFile(path.join(root, 'config.yaml')),
+                fs.readFile(path.join(root, 'testcase_config.py')),
+            ]);
+            let pdoc = await ProblemModel.get(domainId, pid);
+            if (pdoc && !force) throw new Error(`Problem ${domainId}/${pid} already exists. Pass force=true to update it.`);
+            if (pdoc) {
+                pdoc = await ProblemModel.edit(domainId, pdoc.docId, {
+                    title: 'FFT (fp32)',
+                    content,
+                    tag: ['GPU', 'CUDA', 'TileLang', 'TIRx', 'Triton'],
+                    html: false,
+                });
+            } else {
+                const docId = await ProblemModel.add(
+                    domainId, pid, 'FFT (fp32)', content, owner,
+                    ['GPU', 'CUDA', 'TileLang', 'TIRx', 'Triton'],
+                );
+                pdoc = await ProblemModel.get(domainId, docId);
+            }
+            await Promise.all([
+                ProblemModel.addTestdata(domainId, pdoc.docId, 'config.yaml', config, owner),
+                ProblemModel.addTestdata(domainId, pdoc.docId, 'testcase_config.py', testcase, owner),
+            ]);
+            report({ message: `Installed ${domainId}/${pid} (numeric id ${pdoc.docId}).` });
+            return true;
+        },
+    );
+}
+
+export function registerGPUEinsumOuterExample(ctx: Context) {
+    return ctx.addScript(
+        'gpuEinsumOuterExample',
+        'Install the XPUOJ problem 139 compatible bfloat16 Einsum Outer GPU operator problem.',
+        Schema.object({
+            domainId: Schema.string().default('system'),
+            pid: Schema.string().default('GPU7'),
+            owner: Schema.number().default(1).min(1).step(1),
+            force: Schema.boolean().default(false),
+        }),
+        async ({ domainId, pid, owner, force }, report) => {
+            const root = path.resolve(__dirname, '../../../examples/gpu-einsum-outer-bf16');
+            const [content, config, testcase] = await Promise.all([
+                fs.readFile(path.join(root, 'problem.md'), 'utf8'),
+                fs.readFile(path.join(root, 'config.yaml')),
+                fs.readFile(path.join(root, 'testcase_config.py')),
+            ]);
+            let pdoc = await ProblemModel.get(domainId, pid);
+            if (pdoc && !force) throw new Error(`Problem ${domainId}/${pid} already exists. Pass force=true to update it.`);
+            if (pdoc) {
+                pdoc = await ProblemModel.edit(domainId, pdoc.docId, {
+                    title: 'Einsum Outer (bf16)',
+                    content,
+                    tag: [],
+                    html: false,
+                });
+            } else {
+                const docId = await ProblemModel.add(
+                    domainId, pid, 'Einsum Outer (bf16)', content, owner, [],
+                );
+                pdoc = await ProblemModel.get(domainId, docId);
+            }
+            await Promise.all([
+                ProblemModel.addTestdata(domainId, pdoc.docId, 'config.yaml', config, owner),
+                ProblemModel.addTestdata(domainId, pdoc.docId, 'testcase_config.py', testcase, owner),
+            ]);
+            report({ message: `Installed ${domainId}/${pid} (numeric id ${pdoc.docId}).` });
+            return true;
+        },
+    );
+}
